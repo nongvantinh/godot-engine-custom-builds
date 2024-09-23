@@ -1,0 +1,67 @@
+name: Build and Push Godot Containers to GHCR
+
+on:
+  push:
+    branches:
+      - development  # Adjust to your preferred branches
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Setup
+        id: set_root_dir
+        run: |
+          echo "ROOT_DIR=${GITHUB_WORKSPACE}" >> $GITHUB_ENV
+          pip install gdown
+
+      - name: Clone Godot build-containers repository
+        run: git clone -b my-branch https://github.com/nongvantinh/build-containers
+
+      - name: Download Xcode
+        run: |
+          mkdir -p $ROOT_DIR/build-containers/files
+          cd $ROOT_DIR/build-containers/files
+          gdown ${{ secrets.XCODE_SDK_LINK }}
+          echo "Listing files in the current directory:"
+          ls -la
+
+
+      - name: Build Godot Containers with Docker
+        run: |
+          chmod +x $ROOT_DIR/build-containers/build.sh
+          cd $ROOT_DIR/build-containers
+          ./build.sh 4.3 f40  # Replace with the correct Godot branch and Fedora version as needed
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag and Push to GitHub Container Registry
+        run: |
+          docker images --format '{{.Repository}}:{{.Tag}}' | while read image; do
+            IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/$(basename $image)
+            docker tag $image $IMAGE_NAME
+            docker push $IMAGE_NAME
+          done
+
+      - name: Clean Up Dangling Images
+        run: |
+          docker images
+          docker rmi $(docker images -f "dangling=true" -q) || true  # Ignore errors if no dangling images
