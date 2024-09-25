@@ -1,9 +1,7 @@
 name: Build and Push Godot Containers to GHCR
 
 on:
-  push:
-    branches:
-      - development  # Adjust to your preferred branches
+  workflow_dispatch:  # Enables manual trigger from the GitHub UI
 
 permissions:
   contents: read
