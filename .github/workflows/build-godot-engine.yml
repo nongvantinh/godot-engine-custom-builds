@@ -4,8 +4,8 @@ on:
   workflow_dispatch:  # Enables manual trigger from the GitHub UI
 
 permissions:
-  contents: read
-  packages: read
+  contents: write
+  packages: write
 
 jobs:
   run-builds:
