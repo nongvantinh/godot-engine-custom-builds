@@ -4,7 +4,7 @@ on:
   workflow_dispatch:  # Enables manual trigger from the GitHub UI
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   attestations: write
   id-token: write
