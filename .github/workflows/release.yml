@@ -27,7 +27,9 @@ jobs:
             https://api.github.com/repos/nongvantinh/godot-engine-release/actions/artifacts \
             | jq -r '.artifacts[0].id')
           echo "Latest Artifact ID: $latest_artifact_id"
-          echo "::set-output name=artifact_id::$latest_artifact_id"
+
+          # Write the artifact ID to an environment file to set it as an output
+          echo "artifact_id=$latest_artifact_id" >> $GITHUB_ENV
 
   create-release:
     needs: get-latest-artifact-id
@@ -42,7 +44,7 @@ jobs:
         with:
           github-token: ${{ secrets.PAT_TOKEN }}
           repository: nongvantinh/godot-engine-release
-          run-id: ${{ needs.get-latest-artifact-id.outputs.artifact_id }}  # Using the artifact_id directly
+          run-id: ${{ needs.get-latest-artifact-id.outputs.artifact_id }}
 
       - name: Create release
         uses: ncipollo/release-action@v1.12.0
