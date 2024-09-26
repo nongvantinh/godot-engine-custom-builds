@@ -45,12 +45,3 @@ jobs:
         with:
           name: my-artifact
           path: ${{ env.archive_directory }}
-          
-      - name: Create release
-        uses: ncipollo/release-action@v1.12.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          generateReleaseNotes: true
-          allowUpdates: true
-          tag: ${{ github.ref_name }}  # Use the current git tag or ref
-          artifacts: ${{ env.archive_directory }}/*  # Upload all files in the release directory

@@ -1,0 +1,63 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  get-latest-run-id:
+    runs-on: ubuntu-latest
+    outputs:
+      run_id: ${{ steps.get-run-id.outputs.run_id }}
+    steps:
+      - name: Set up GitHub CLI authentication
+        run: echo "GH_TOKEN=${{ secrets.PAT_TOKEN }}" >> $GITHUB_ENV
+        
+      - name: List artifacts for a repository
+        run: |
+          curl -L \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/nongvantinh/godot-engine-release/actions/artifacts
+      
+      - name: Get latest workflow run ID
+        id: get-run-id
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          latest_run=$(gh api \
+            repos/nongvantinh/godot-engine-release/actions/runs \
+            -F event=push -F status=success \
+            --jq '.workflow_runs[0].id')
+          echo "run_id=$latest_run" >> $GITHUB_ENV
+          echo "::set-output name=run_id::$latest_run"
+
+  create-release:
+    needs: get-latest-run-id
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: my-artifact
+          github-token: ${{ secrets.PAT_TOKEN }}
+          repository: nongvantinh/godot-engine-release
+          run-id: ${{ needs.get-latest-run-id.outputs.run_id }}
+
+      - name: Create release
+        uses: ncipollo/release-action@v1.12.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          generateReleaseNotes: true
+          allowUpdates: true
+          tag: ${{ github.ref_name }}
+          artifacts: '**/*'
