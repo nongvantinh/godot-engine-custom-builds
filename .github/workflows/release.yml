@@ -43,6 +43,7 @@ jobs:
       - name: Download latest artifact using Workflow Run ID
         uses: actions/download-artifact@v4
         with:
+          name: my-artifact
           github-token: ${{ secrets.PAT_TOKEN }}
           repository: nongvantinh/godot-engine-release
           run-id: ${{ needs.get-latest-workflow-run-id.outputs.workflow_run_id }}
