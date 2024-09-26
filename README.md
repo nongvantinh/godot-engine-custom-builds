@@ -1,3 +1,13 @@
+When setting up a GitHub Self-Hosted Runner, remember to install it as a service and run it as root. Just create the runner as usual, but in the `Configure` part, use this command instead: 
+
+```
+sudo ./svc.sh install root
+
+sudo ./svc.sh start
+```
+
+
+
 # Setting Up macOS Container with Xcode SDK
 
 To prepare your macOS container, you need to install the [Xcode SDK](https://developer.apple.com/services-account/download?path=/Developer_Tools/Xcode_15.4/Xcode_15.4.xip) (we are currently using version 15.4). For more information, refer to this [StackOverflow answer](https://stackoverflow.com/a/10335943/12234661).
