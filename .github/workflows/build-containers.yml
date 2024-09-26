@@ -24,7 +24,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Setup
+      - name: Setup Environment
         id: set_root_dir
         run: |
           echo "ROOT_DIR=${GITHUB_WORKSPACE}" >> $GITHUB_ENV
