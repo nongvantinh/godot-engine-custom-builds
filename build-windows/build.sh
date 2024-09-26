@@ -1,9 +1,9 @@
-!/bin/bash
+#!/bin/bash
 
 set -e
+set -x  # Enable debugging
 
-Config
-
+# Config
 export SCONS="scons -j${NUM_CORES} verbose=yes warnings=no progress=no"
 export OPTIONS="production=yes use_mingw=yes angle_libs=/root/angle mesa_libs=/root/mesa d3d12=yes"
 export OPTIONS_MONO="module_mono_enabled=yes"
@@ -15,44 +15,47 @@ mkdir godot
 cd godot
 tar xf /root/godot.tar.gz --strip-components=1
 
-Classical
-
+# Classical
 if [ "${CLASSICAL}" == "1" ]; then
   echo "Starting classical build for Windows..."
 
+  # Build for x86_64
   $SCONS platform=windows arch=x86_64 $OPTIONS target=editor
   mkdir -p /root/out/x86_64/tools
   cp -rvp bin/* /root/out/x86_64/tools
   rm -rf bin
 
-  $SCONS platform=windows arch=x86_64 $OPTIONS target=template_debug
-  $SCONS platform=windows arch=x86_64 $OPTIONS target=template_release
-  mkdir -p /root/out/x86_64/templates
-  cp -rvp bin/* /root/out/x86_64/templates
-  rm -rf bin
+  # $SCONS platform=windows arch=x86_64 $OPTIONS target=template_debug
+  # $SCONS platform=windows arch=x86_64 $OPTIONS target=template_release
+  # mkdir -p /root/out/x86_64/templates
+  # cp -rvp bin/* /root/out/x86_64/templates
+  # rm -rf bin
 
-  $SCONS platform=windows arch=x86_32 $OPTIONS target=editor
-  mkdir -p /root/out/x86_32/tools
-  cp -rvp bin/* /root/out/x86_32/tools
-  rm -rf bin
+  # # Build for x86_32
+  # $SCONS platform=windows arch=x86_32 $OPTIONS target=editor
+  # mkdir -p /root/out/x86_32/tools
+  # cp -rvp bin/* /root/out/x86_32/tools
+  # rm -rf bin
 
-  $SCONS platform=windows arch=x86_32 $OPTIONS target=template_debug
-  $SCONS platform=windows arch=x86_32 $OPTIONS target=template_release
-  mkdir -p /root/out/x86_32/templates
-  cp -rvp bin/* /root/out/x86_32/templates
-  rm -rf bin
+  # $SCONS platform=windows arch=x86_32 $OPTIONS target=template_debug
+  # $SCONS platform=windows arch=x86_32 $OPTIONS target=template_release
+  # mkdir -p /root/out/x86_32/templates
+  # cp -rvp bin/* /root/out/x86_32/templates
+  # rm -rf bin
 
-  $SCONS platform=windows arch=arm64 $OPTIONS $OPTIONS_LLVM target=editor
-  mkdir -p /root/out/arm64/tools
-  cp -rvp bin/* /root/out/arm64/tools
-  rm -rf bin
+  # # Build for arm64
+  # $SCONS platform=windows arch=arm64 $OPTIONS $OPTIONS_LLVM target=editor
+  # mkdir -p /root/out/arm64/tools
+  # cp -rvp bin/* /root/out/arm64/tools
+  # rm -rf bin
 
-  $SCONS platform=windows arch=arm64 $OPTIONS $OPTIONS_LLVM target=template_debug
-  $SCONS platform=windows arch=arm64 $OPTIONS $OPTIONS_LLVM target=template_release
-  mkdir -p /root/out/arm64/templates
-  cp -rvp bin/* /root/out/arm64/templates
-  rm -rf bin
+  # $SCONS platform=windows arch=arm64 $OPTIONS $OPTIONS_LLVM target=template_debug
+  # $SCONS platform=windows arch=arm64 $OPTIONS $OPTIONS_LLVM target=template_release
+  # mkdir -p /root/out/arm64/templates
+  # cp -rvp bin/* /root/out/arm64/templates
+  # rm -rf bin
 
+  # Steam build
   if [ "${STEAM}" == "1" ]; then
     build_name=${BUILD_NAME}
     export BUILD_NAME="steam"
@@ -65,8 +68,7 @@ if [ "${CLASSICAL}" == "1" ]; then
   fi
 fi
 
-Mono
-
+# Mono
 if [ "${MONO}" == "1" ]; then
   echo "Starting Mono build for Windows..."
 

@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -e
+set -x  # Enable debugging
 
 # Set the Godot version and image version (these can be passed as arguments if needed)
 GODOT_VERSION="4.3.1"
@@ -20,6 +21,7 @@ mkdir -p ${basedir}/out/logs
 
 # Function to download dependencies if missing
 download_dependencies() {
+  echo "Downloading dependencies"
   # Download ANGLE libraries
   if [ ! -d "${basedir}/deps/angle" ]; then
     echo "Downloading ANGLE libraries..."
@@ -92,11 +94,12 @@ download_dependencies
 prepare_godot_source
 
 WINDOWS_CONTAINER="ghcr.io/nongvantinh/godot-windows:${CONTAINER_VERSION}-${IMG_VERSION}"
-LINUX_CONTAINER="ghcr.io/nongvantinh/godot-linux:${CONTAINER_VERSION}-${IMG_VERSION}"
-WEB_CONTAINER="ghcr.io/nongvantinh/godot-web:${CONTAINER_VERSION}-${IMG_VERSION}"
-MACOS_CONTAINER="ghcr.io/nongvantinh/godot-osx:${CONTAINER_VERSION}-${IMG_VERSION}"
-ANDROID_CONTAINER="ghcr.io/nongvantinh/godot-android:${CONTAINER_VERSION}-${IMG_VERSION}"
-IOS_CONTAINER="ghcr.io/nongvantinh/godot-ios:${CONTAINER_VERSION}-${IMG_VERSION}"
+# LINUX_CONTAINER="ghcr.io/nongvantinh/godot-linux:${CONTAINER_VERSION}-${IMG_VERSION}"
+# WEB_CONTAINER="ghcr.io/nongvantinh/godot-web:${CONTAINER_VERSION}-${IMG_VERSION}"
+# MACOS_CONTAINER="ghcr.io/nongvantinh/godot-osx:${CONTAINER_VERSION}-${IMG_VERSION}"
+# ANDROID_CONTAINER="ghcr.io/nongvantinh/godot-android:${CONTAINER_VERSION}-${IMG_VERSION}"
+# IOS_CONTAINER="ghcr.io/nongvantinh/godot-ios:${CONTAINER_VERSION}-${IMG_VERSION}"
+# echo "Running Dockers"
 
 docker_run="docker run --rm --env BUILD_NAME --env GODOT_VERSION_STATUS --env NUM_CORES --env CLASSICAL=${build_classical} --env MONO=${build_mono} -v ${basedir}/godot-${GODOT_VERSION}.tar.gz:/root/godot.tar.gz -v ${basedir}/mono-glue:/root/mono-glue -w /root/"
 
