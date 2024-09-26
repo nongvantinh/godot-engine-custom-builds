@@ -41,10 +41,15 @@ jobs:
           cp -r out/* release/  # Copy output artifacts to a release directory
           echo "archive_directory=$(pwd)/release" >> $GITHUB_ENV
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: my-artifact
+          path: ${{ env.archive_directory }}
+          
       - name: Create release
         uses: ncipollo/release-action@v1.12.0
         with:
-          token: ${{ secrets.PAT_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           generateReleaseNotes: true
           allowUpdates: true
           tag: ${{ github.ref_name }}  # Use the current git tag or ref
