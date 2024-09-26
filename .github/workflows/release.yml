@@ -9,49 +9,40 @@ permissions:
   contents: write
 
 jobs:
-  get-latest-run-id:
+  get-latest-artifact-id:
     runs-on: ubuntu-latest
     outputs:
-      run_id: ${{ steps.get-run-id.outputs.run_id }}
+      artifact_id: ${{ steps.get-artifact-id.outputs.artifact_id }}
     steps:
       - name: Set up GitHub CLI authentication
         run: echo "GH_TOKEN=${{ secrets.PAT_TOKEN }}" >> $GITHUB_ENV
-        
-      - name: List artifacts for a repository
+
+      - name: Get latest artifact ID
+        id: get-artifact-id
         run: |
-          curl -L \
+          latest_artifact_id=$(curl -L \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/nongvantinh/godot-engine-release/actions/artifacts
-      
-      - name: Get latest workflow run ID
-        id: get-run-id
-        env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
-        run: |
-          latest_run=$(gh api \
-            repos/nongvantinh/godot-engine-release/actions/runs \
-            -F event=push -F status=success \
-            --jq '.workflow_runs[0].id')
-          echo "run_id=$latest_run" >> $GITHUB_ENV
-          echo "::set-output name=run_id::$latest_run"
+            https://api.github.com/repos/nongvantinh/godot-engine-release/actions/artifacts \
+            | jq -r '.artifacts[0].id')
+          echo "Latest Artifact ID: $latest_artifact_id"
+          echo "::set-output name=artifact_id::$latest_artifact_id"
 
   create-release:
-    needs: get-latest-run-id
+    needs: get-latest-artifact-id
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download build artifacts
+      - name: Download latest artifact using ID
         uses: actions/download-artifact@v4
         with:
-          name: my-artifact
           github-token: ${{ secrets.PAT_TOKEN }}
           repository: nongvantinh/godot-engine-release
-          run-id: ${{ needs.get-latest-run-id.outputs.run_id }}
+          run-id: ${{ needs.get-latest-artifact-id.outputs.artifact_id }}  # Using the artifact_id directly
 
       - name: Create release
         uses: ncipollo/release-action@v1.12.0
@@ -60,4 +51,4 @@ jobs:
           generateReleaseNotes: true
           allowUpdates: true
           tag: ${{ github.ref_name }}
-          artifacts: '**/*'
+          artifacts: '**/*'  # Upload all files from downloaded artifacts
