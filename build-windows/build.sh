@@ -25,45 +25,45 @@ if [ "${CLASSICAL}" == "1" ]; then
   cp -rvp bin/* /root/out/x86_64/tools
   rm -rf bin
 
-  $SCONS platform=windows arch=x86_64 $OPTIONS target=template_debug
-  $SCONS platform=windows arch=x86_64 $OPTIONS target=template_release
-  mkdir -p /root/out/x86_64/templates
-  cp -rvp bin/* /root/out/x86_64/templates
-  rm -rf bin
+#   $SCONS platform=windows arch=x86_64 $OPTIONS target=template_debug
+#   $SCONS platform=windows arch=x86_64 $OPTIONS target=template_release
+#   mkdir -p /root/out/x86_64/templates
+#   cp -rvp bin/* /root/out/x86_64/templates
+#   rm -rf bin
 
-  $SCONS platform=windows arch=x86_32 $OPTIONS target=editor
-  mkdir -p /root/out/x86_32/tools
-  cp -rvp bin/* /root/out/x86_32/tools
-  rm -rf bin
+#   $SCONS platform=windows arch=x86_32 $OPTIONS target=editor
+#   mkdir -p /root/out/x86_32/tools
+#   cp -rvp bin/* /root/out/x86_32/tools
+#   rm -rf bin
 
-  $SCONS platform=windows arch=x86_32 $OPTIONS target=template_debug
-  $SCONS platform=windows arch=x86_32 $OPTIONS target=template_release
-  mkdir -p /root/out/x86_32/templates
-  cp -rvp bin/* /root/out/x86_32/templates
-  rm -rf bin
+#   $SCONS platform=windows arch=x86_32 $OPTIONS target=template_debug
+#   $SCONS platform=windows arch=x86_32 $OPTIONS target=template_release
+#   mkdir -p /root/out/x86_32/templates
+#   cp -rvp bin/* /root/out/x86_32/templates
+#   rm -rf bin
 
-  $SCONS platform=windows arch=arm64 $OPTIONS $OPTIONS_LLVM target=editor
-  mkdir -p /root/out/arm64/tools
-  cp -rvp bin/* /root/out/arm64/tools
-  rm -rf bin
+#   $SCONS platform=windows arch=arm64 $OPTIONS $OPTIONS_LLVM target=editor
+#   mkdir -p /root/out/arm64/tools
+#   cp -rvp bin/* /root/out/arm64/tools
+#   rm -rf bin
 
-  $SCONS platform=windows arch=arm64 $OPTIONS $OPTIONS_LLVM target=template_debug
-  $SCONS platform=windows arch=arm64 $OPTIONS $OPTIONS_LLVM target=template_release
-  mkdir -p /root/out/arm64/templates
-  cp -rvp bin/* /root/out/arm64/templates
-  rm -rf bin
+#   $SCONS platform=windows arch=arm64 $OPTIONS $OPTIONS_LLVM target=template_debug
+#   $SCONS platform=windows arch=arm64 $OPTIONS $OPTIONS_LLVM target=template_release
+#   mkdir -p /root/out/arm64/templates
+#   cp -rvp bin/* /root/out/arm64/templates
+#   rm -rf bin
 
-  if [ "${STEAM}" == "1" ]; then
-    build_name=${BUILD_NAME}
-    export BUILD_NAME="steam"
-    $SCONS platform=windows arch=x86_64 $OPTIONS target=editor steamapi=yes
-    $SCONS platform=windows arch=x86_32 $OPTIONS target=editor steamapi=yes
-    mkdir -p /root/out/steam
-    cp -rvp bin/* /root/out/steam
-    rm -rf bin
-    export BUILD_NAME=${build_name}
-  fi
-fi
+#   if [ "${STEAM}" == "1" ]; then
+#     build_name=${BUILD_NAME}
+#     export BUILD_NAME="steam"
+#     $SCONS platform=windows arch=x86_64 $OPTIONS target=editor steamapi=yes
+#     $SCONS platform=windows arch=x86_32 $OPTIONS target=editor steamapi=yes
+#     mkdir -p /root/out/steam
+#     cp -rvp bin/* /root/out/steam
+#     rm -rf bin
+#     export BUILD_NAME=${build_name}
+#   fi
+# fi
 
 # Mono
 
