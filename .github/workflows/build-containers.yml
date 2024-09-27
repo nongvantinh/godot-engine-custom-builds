@@ -17,6 +17,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Cache XCode SDK
+        id: cache-xcode-sdk
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-xcode-sdk
+        with:
+          path: $HOME/.cache/github-runners/build-containers
+          key: ${{ runner.os }}-build-${{ env.cache-name }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10' 
@@ -34,9 +45,10 @@ jobs:
         run: git clone -b my-branch https://github.com/nongvantinh/build-containers
 
       - name: Download Xcode
+        if: steps.cache-xcode-sdk.outputs.cache-hit != 'true'
         run: |
-          mkdir -p $ROOT_DIR/build-containers/files
-          cd $ROOT_DIR/build-containers/files
+          mkdir -p $HOME/.cache/github-runners/build-containers/files
+          cd $HOME/.cache/github-runners/build-containers/files
           gdown ${{ secrets.XCODE_SDK_LINK }}
           echo "Listing files in the current directory:"
           ls -la
