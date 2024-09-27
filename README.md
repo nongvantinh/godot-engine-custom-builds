@@ -1,4 +1,4 @@
-When setting up a GitHub Self-Hosted Runner, remember to install it as a service and run it as root. Just create the runner as usual, but in the `Configure` part, use this command instead: 
+When setting up a GitHub Self-Hosted Runner, remember to install it as a service and run it as root. Just create the runner as usual, but in the `Configure` part after calling ` ./config.sh --url `, use this command instead of `./run.sh`: 
 
 ```
 sudo ./svc.sh install root
