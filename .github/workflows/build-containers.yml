@@ -15,7 +15,7 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
@@ -25,25 +25,13 @@ jobs:
         run: env
     
       - name: Setup Environment
-        id: set_root_dir
         run: |
-          echo "ROOT_DIR=${GITHUB_WORKSPACE}" >> $GITHUB_ENV
           echo "HOME=/home/ubuntu" >> $GITHUB_ENV
+          echo "ARTIFACTS_ROOT_PATH=/home/ubuntu/.cache/github-runners/build-containers" >> $GITHUB_ENV
           pip install gdown
       
       - name: Print Environment Variables
         run: env
-
-      - name: Cache XCode SDK
-        id: cache-xcode-sdk
-        uses: actions/cache@v4
-        env:
-          cache-name: cache-xcode-sdk
-        with:
-          path: $HOME/.cache/github-runners/build-containers
-          key: ${{ runner.os }}-build-${{ env.cache-name }}
-          restore-keys: |
-            ${{ runner.os }}-build-${{ env.cache-name }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -52,19 +40,22 @@ jobs:
         run: git clone -b my-branch https://github.com/nongvantinh/build-containers
 
       - name: Download Xcode
-        if: steps.cache-xcode-sdk.outputs.cache-hit != 'true'
         run: |
-          mkdir -p $HOME/.cache/github-runners/build-containers/files
-          cd $HOME/.cache/github-runners/build-containers/files
-          gdown ${{ secrets.XCODE_SDK_LINK }}
-          echo "Listing files in the current directory:"
-          ls -la
-
+          mkdir -p $ARTIFACTS_ROOT_PATH/files
+          cd $ARTIFACTS_ROOT_PATH/files
+          if ls Xcode_*.xip 1> /dev/null 2>&1; then
+            echo "Xcode file already exists, skipping download."
+          else
+            echo "Downloading Xcode..."
+            gdown ${{ secrets.XCODE_SDK_LINK }}
+            echo "Listing files in the current directory:"
+            ls -la
+          fi
 
       - name: Build Godot Containers with Docker
         run: |
-          chmod +x $ROOT_DIR/build-containers/build.sh
-          cd $ROOT_DIR/build-containers
+          chmod +x ${GITHUB_WORKSPACE}/build-containers/build.sh
+          cd ${GITHUB_WORKSPACE}/build-containers
           ./build.sh 4.3 f40  # Replace with the correct Godot branch and Fedora version as needed
 
       - name: Log in to GitHub Container Registry
