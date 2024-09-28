@@ -62,15 +62,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Tag and Push to GitHub Container Registry
-        run: |
-          docker images --format '{{.Repository}}:{{.Tag}}' | while read image; do
-            IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/$(basename $image)
-            docker tag $image $IMAGE_NAME
-            docker push $IMAGE_NAME
-          done
 
       - name: Clean Up Dangling Images
         run: |
           docker images
           docker rmi $(docker images -f "dangling=true" -q) || true  # Ignore errors if no dangling images
+
+      - name: Tag and Push to GitHub Container Registry
+        run: |
+          REGISTRY_URL="ghcr.io"  # Define your registry URL
+          docker images --format '{{.Repository}}:{{.Tag}}' | while read image; do
+            if [[ $image == *"godot"* ]] && [[ $image != *"/"* ]]; then
+              REPO_NAME=$(echo $image | awk -F ':' '{print $1}')
+              TAG=$(echo $image | awk -F ':' '{print $2}')
+
+              IMAGE_NAME="${REGISTRY_URL}/${{ github.repository_owner }}/$REPO_NAME"
+
+              echo "Tagging $image as $IMAGE_NAME:$TAG"
+              docker tag "$image" "$IMAGE_NAME:$TAG"
+
+              echo "Pushing $IMAGE_NAME:$TAG to $REGISTRY_URL"
+              docker push "$IMAGE_NAME:$TAG"
+            fi
+          done

@@ -54,10 +54,10 @@ docker_build() {
     2>&1 | tee logs/"$1".log
 }
 
-# docker_build linux
-# docker_build windows
-# docker_build web
-# docker_build android
+docker_build linux
+docker_build windows
+docker_build web
+docker_build android
 
 XCODE_SDK=15.4
 OSX_SDK=14.5
