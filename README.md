@@ -1,4 +1,3 @@
-
 Follow this instruction to install docker https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository
 
 When setting up a GitHub Self-Hosted Runner, remember to install it as a service and run it as root. Just create the runner as usual, but in the `Configure` part after calling ` ./config.sh --url `, use this command instead of `./run.sh`: 

@@ -1,4 +1,4 @@
-name: Use Pre-built Godot Containers
+name: Build Godot Engine And Templates Using Pre-built Containers
 
 on:
   workflow_dispatch:  # Enables manual trigger from the GitHub UI
@@ -31,14 +31,14 @@ jobs:
 
       - name: Run build.sh to Invoke Docker Builds
         run: |
-          chmod +x ./build.sh
-          ./build.sh  # Runs the build script
+          chmod +x build-godot-and-templates/build.sh
+          ./build-godot-and-templates/build.sh  # Runs the build script
 
       - name: Prepare artifacts for release
         id: export
         run: |
           mkdir -p release
-          cp -r out/* release/  # Copy output artifacts to a release directory
+          cp -r build/godot-and-templates/out/* release/  # Copy output artifacts to a release directory
           echo "archive_directory=$(pwd)/release" >> $GITHUB_ENV
 
       - uses: actions/upload-artifact@v4

@@ -7,7 +7,7 @@ set -x  # Enable debugging
 GODOT_VERSION="4.3.1"
 IMG_VERSION="f40"
 export NUM_CORES=$(nproc --ignore=1)
-echo "number of cores: ${NUM_CORES}"
+echo "number of cores will be used: ${NUM_CORES}"
 basedir=$(pwd)
 git_treeish="4.3"  # You can change this as needed or pass it as an argument
 CONTAINER_VERSION="4.3"
@@ -94,8 +94,8 @@ download_dependencies
 prepare_godot_source
 
 WINDOWS_CONTAINER="ghcr.io/nongvantinh/godot-windows:${CONTAINER_VERSION}-${IMG_VERSION}"
-# LINUX_CONTAINER="ghcr.io/nongvantinh/godot-linux:${CONTAINER_VERSION}-${IMG_VERSION}"
-# WEB_CONTAINER="ghcr.io/nongvantinh/godot-web:${CONTAINER_VERSION}-${IMG_VERSION}"
+LINUX_CONTAINER="ghcr.io/nongvantinh/godot-linux:${CONTAINER_VERSION}-${IMG_VERSION}"
+WEB_CONTAINER="ghcr.io/nongvantinh/godot-web:${CONTAINER_VERSION}-${IMG_VERSION}"
 # MACOS_CONTAINER="ghcr.io/nongvantinh/godot-osx:${CONTAINER_VERSION}-${IMG_VERSION}"
 # ANDROID_CONTAINER="ghcr.io/nongvantinh/godot-android:${CONTAINER_VERSION}-${IMG_VERSION}"
 # IOS_CONTAINER="ghcr.io/nongvantinh/godot-ios:${CONTAINER_VERSION}-${IMG_VERSION}"
@@ -103,17 +103,17 @@ WINDOWS_CONTAINER="ghcr.io/nongvantinh/godot-windows:${CONTAINER_VERSION}-${IMG_
 
 docker_run="docker run --rm --env BUILD_NAME --env GODOT_VERSION_STATUS --env NUM_CORES --env CLASSICAL=${build_classical} --env MONO=${build_mono} -v ${basedir}/godot-${GODOT_VERSION}.tar.gz:/root/godot.tar.gz -v ${basedir}/mono-glue:/root/mono-glue -w /root/"
 
-# mkdir -p ${basedir}/mono-glue
-# ${docker_run} -v ${basedir}/build-mono-glue:/root/build ${LINUX_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/mono-glue
+mkdir -p ${basedir}/mono-glue
+${docker_run} -v ${basedir}/build-mono-glue:/root/build ${LINUX_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/mono-glue
 
 mkdir -p ${basedir}/out/windows
 ${docker_run} -v ${basedir}/build-windows:/root/build -v ${basedir}/out/windows:/root/out -v ${basedir}/deps/angle:/root/angle -v ${basedir}/deps/mesa:/root/mesa --env STEAM=${build_steam} ${WINDOWS_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/windows
 
-# mkdir -p ${basedir}/out/linux
-# ${docker_run} -v ${basedir}/build-linux:/root/build -v ${basedir}/out/linux:/root/out ${LINUX_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/linux
+mkdir -p ${basedir}/out/linux
+${docker_run} -v ${basedir}/build-linux:/root/build -v ${basedir}/out/linux:/root/out ${LINUX_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/linux
 
-# mkdir -p ${basedir}/out/web
-# ${docker_run} -v ${basedir}/build-web:/root/build -v ${basedir}/out/web:/root/out ${WEB_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/web
+mkdir -p ${basedir}/out/web
+${docker_run} -v ${basedir}/build-web:/root/build -v ${basedir}/out/web:/root/out ${WEB_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/web
 
 # mkdir -p ${basedir}/out/macos
 # ${docker_run} -v ${basedir}/build-macos:/root/build -v ${basedir}/out/macos:/root/out -v ${basedir}/deps/moltenvk:/root/moltenvk -v ${basedir}/deps/angle:/root/angle ${MACOS_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/macos
