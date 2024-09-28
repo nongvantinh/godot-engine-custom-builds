@@ -4,7 +4,7 @@ basedir=$(cd $(dirname "$0"); pwd)
 
 source $basedir/setup.sh
 
-artifact_basedir=$ARTIFACTS_ROOT_PATH
+osx_sdk_path="$CACHED_OSX_SDK_PATH"
 
 
 if [ -z "$1" -o -z "$2" ]; then
@@ -25,7 +25,7 @@ fi
 godot_branch=$1
 base_distro=$2
 img_version=$godot_branch-$base_distro
-files_root="$artifact_basedir/files"
+files_root="$basedir/files"
 
 if [ ! -z "$PS1" ]; then
   # Confirm settings
@@ -63,14 +63,18 @@ XCODE_SDK=15.4
 OSX_SDK=14.5
 IOS_SDK=17.5
 if [ ! -e "${files_root}"/MacOSX${OSX_SDK}.sdk.tar.xz ] || [ ! -e "${files_root}"/iPhoneOS${IOS_SDK}.sdk.tar.xz ] || [ ! -e "${files_root}"/iPhoneSimulator${IOS_SDK}.sdk.tar.xz ]; then
-  if [ ! -r "${files_root}"/Xcode_${XCODE_SDK}.xip ]; then
+  if [ ! -r "${osx_sdk_path}"/Xcode_${XCODE_SDK}.xip ]; then
     echo
     echo "Error: 'files/Xcode_${XCODE_SDK}.xip' is required for Apple platforms, but was not found or couldn't be read."
     echo "It can be downloaded from https://developer.apple.com/download/more/ with a valid apple ID."
     exit 1
   fi
 
+  cp -r "$osx_sdk_path"/* ./files
   echo "Building OSX and iOS SDK packages. This will take a while"
+  echo "The location of osx_sdk_path is: ${osx_sdk_path}"
+  echo "The location of files_root is: ${files_root}"
+  
   docker_build xcode
   docker run --rm \
     -v ${files_root}:/root/files \

@@ -27,7 +27,7 @@ jobs:
       - name: Setup Environment
         run: |
           echo "HOME=/home/${{ secrets.HOST_USER_NAME }}" >> $GITHUB_ENV
-          echo "ARTIFACTS_ROOT_PATH=/home/${{ secrets.HOST_USER_NAME }}/.cache/github-runners/build-containers" >> $GITHUB_ENV
+          echo "CACHED_OSX_SDK_PATH=/home/${{ secrets.HOST_USER_NAME }}/.cache/github-runners/build-containers/osx-sdk" >> $GITHUB_ENV
           pip install gdown
       
       - name: Print Environment Variables
@@ -38,8 +38,8 @@ jobs:
 
       - name: Download Xcode
         run: |
-          mkdir -p $ARTIFACTS_ROOT_PATH/files
-          cd $ARTIFACTS_ROOT_PATH/files
+          mkdir -p $CACHED_OSX_SDK_PATH
+          cd $CACHED_OSX_SDK_PATH
           if ls Xcode_*.xip 1> /dev/null 2>&1; then
             echo "Xcode file already exists, skipping download."
           else
