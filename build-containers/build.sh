@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+
+basedir=$(cd $(dirname "$0"); pwd)
+
+source $basedir/setup.sh
+
+artifact_basedir=$ARTIFACTS_ROOT_PATH
+
+
+if [ -z "$1" -o -z "$2" ]; then
+  echo "Usage: $0 <godot branch> <base distro>"
+  echo
+  echo "Example: $0 4.x f39"
+  echo
+  echo "godot branch:"
+  echo "        Informational, tracks the Godot branch these containers are intended for."
+  echo
+  echo "base distro:"
+  echo "        Informational, tracks the base Linux distro these containers are based on."
+  echo
+  echo "The resulting image version will be <godot branch>-<base distro>."
+  exit 1
+fi
+
+godot_branch=$1
+base_distro=$2
+img_version=$godot_branch-$base_distro
+files_root="$artifact_basedir/files"
+
+if [ ! -z "$PS1" ]; then
+  # Confirm settings
+  echo "Docker image tag: ${img_version}"
+  echo
+  while true; do
+    read -p "Is this correct? [y/n] " yn
+    case $yn in
+      [Yy]* ) break;;
+      [Nn]* ) exit 1;;
+      * ) echo "Please answer yes or no.";;
+    esac
+  done
+fi
+
+mkdir -p logs
+
+docker build -t godot-fedora:${img_version} -f Dockerfile.base . 2>&1 | tee logs/base.log
+
+docker_build() {
+  docker build \
+    --no-cache \
+    --build-arg img_version=${img_version} \
+    -t godot-"$1:${img_version}" \
+    -f Dockerfile."$1" . \
+    2>&1 | tee logs/"$1".log
+}
+
+docker_build linux
+docker_build windows
+docker_build web
+docker_build android
+
+XCODE_SDK=15.4
+OSX_SDK=14.5
+IOS_SDK=17.5
+if [ ! -e "${files_root}"/MacOSX${OSX_SDK}.sdk.tar.xz ] || [ ! -e "${files_root}"/iPhoneOS${IOS_SDK}.sdk.tar.xz ] || [ ! -e "${files_root}"/iPhoneSimulator${IOS_SDK}.sdk.tar.xz ]; then
+  if [ ! -r "${files_root}"/Xcode_${XCODE_SDK}.xip ]; then
+    echo
+    echo "Error: 'files/Xcode_${XCODE_SDK}.xip' is required for Apple platforms, but was not found or couldn't be read."
+    echo "It can be downloaded from https://developer.apple.com/download/more/ with a valid apple ID."
+    exit 1
+  fi
+
+  echo "Building OSX and iOS SDK packages. This will take a while"
+  docker_build xcode
+  docker run --rm \
+    -v ${files_root}:/root/files \
+    -e XCODE_SDKV=${XCODE_SDK} \
+    -e OSX_SDKV=${OSX_SDK} \
+    -e IOS_SDKV=${IOS_SDK} \
+    godot-xcode:${img_version} \
+    2>&1 | tee logs/xcode_packer.log
+
+  echo "SDK packages copied to '${files_root}'"
+fi
+
+docker_build osx
+docker_build ios

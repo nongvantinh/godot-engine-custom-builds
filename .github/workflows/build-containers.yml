@@ -1,4 +1,4 @@
-name: Build and Push Godot Containers to GHCR
+name: Build and Push Containers to GHCR
 
 on:
   workflow_dispatch:  # Enables manual trigger from the GitHub UI
@@ -26,8 +26,8 @@ jobs:
     
       - name: Setup Environment
         run: |
-          echo "HOME=/home/ubuntu" >> $GITHUB_ENV
-          echo "ARTIFACTS_ROOT_PATH=/home/ubuntu/.cache/github-runners/build-containers" >> $GITHUB_ENV
+          echo "HOME=/home/${{ secrets.HOST_USER_NAME }}" >> $GITHUB_ENV
+          echo "ARTIFACTS_ROOT_PATH=/home/${{ secrets.HOST_USER_NAME }}/.cache/github-runners/build-containers" >> $GITHUB_ENV
           pip install gdown
       
       - name: Print Environment Variables
@@ -35,9 +35,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Clone Godot build-containers repository
-        run: git clone -b my-branch https://github.com/nongvantinh/build-containers
 
       - name: Download Xcode
         run: |
