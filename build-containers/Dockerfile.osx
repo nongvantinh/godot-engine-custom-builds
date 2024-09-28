@@ -1,6 +1,9 @@
 ARG img_version=latest
 FROM godot-fedora:${img_version}
 
+# Copy the necessary files into the image
+COPY files /root/files
+
 ENV OSX_SDK=14.5
 
 RUN dnf -y install --setopt=install_weak_deps=False \
