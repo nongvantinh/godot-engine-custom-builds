@@ -1,25 +1,21 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-source $(dirname "$0")/setup.sh
+# Clean Up Dangling Images
+echo "Cleaning up dangling images..."
+docker rmi $(docker images -f "dangling=true" -q) || true  # Ignore errors if no dangling images
 
-img_version=$1
-registry=$2
+echo "Tagging and pushing images..."
+docker images --format '{{.Repository}}:{{.Tag}}' | while read -r image; do
+  if [[ $image == *"godot"* ]] && [[ $image != *"/"* ]]; then
+    REPO_NAME=$(echo $image | awk -F ':' '{print $1}')
+    TAG=$(echo $image | awk -F ':' '{print $2}')
 
-if [ -z "${img_version}" ]; then
-  echo "No image version was provided, aborting. Check script for usage."
-  exit 1
-fi
+    IMAGE_NAME="${REGISTRY_URL}/${GITHUB_REPOSITORY_OWNER}/$REPO_NAME"
 
-if [ -z "${registry}" ]; then
-  registry=registry.prehensile-tales.com
-fi
+    echo "Tagging $image as $IMAGE_NAME:$TAG"
+    docker tag "$image" "$IMAGE_NAME:$TAG"
 
-"$podman" push godot-export:${img_version} ${registry}/godot/export
-"$podman" push godot-linux:${img_version} ${registry}/godot/linux
-"$podman" push godot-windows:${img_version} ${registry}/godot/windows
-"$podman" push godot-web:${img_version} ${registry}/godot/web
-"$podman" push godot-xcode:${img_version} ${registry}/godot/xcode
-
-"$podman" push godot-android:${img_version} ${registry}/godot-private/android
-"$podman" push godot-ios:${img_version} ${registry}/godot-private/ios
-"$podman" push godot-osx:${img_version} ${registry}/godot-private/macosx
+    echo "Pushing $IMAGE_NAME:$TAG to $REGISTRY_URL"
+    docker push "$IMAGE_NAME:$TAG"
+  fi
+done

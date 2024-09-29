@@ -26,7 +26,9 @@ jobs:
     
       - name: Setup Environment
         run: |
-          echo "HOME=/home/${{ secrets.HOST_USER_NAME }}" >> $GITHUB_ENV
+          echo "REGISTRY_URL=ghcr.io" >> $GITHUB_ENV
+          echo "GITHUB_REPOSITORY_OWNER=${{ github.repository_owner }}" >> $GITHUB_ENV
+          echo "USER_HOME_DIRECTORY=/home/${{ secrets.HOST_USER_NAME }}" >> $GITHUB_ENV
           echo "CACHED_OSX_SDK_PATH=/home/${{ secrets.HOST_USER_NAME }}/.cache/github-runners/build-containers/osx-sdk" >> $GITHUB_ENV
           pip install gdown
       
@@ -51,9 +53,8 @@ jobs:
 
       - name: Build Godot Containers with Docker
         run: |
-          chmod +x ${GITHUB_WORKSPACE}/build-containers/build.sh
-          cd ${GITHUB_WORKSPACE}/build-containers
-          ./build.sh 4.3 f40  # Replace with the correct Godot branch and Fedora version as needed
+          chmod +x "${GITHUB_WORKSPACE}/build-containers/build.sh" \
+          && "${GITHUB_WORKSPACE}/build-containers/build.sh" 4.3 f40  # Replace with the correct Godot branch and Fedora version as needed
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -62,26 +63,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-
-      - name: Clean Up Dangling Images
+      - name: Run Cleanup and Push to GitHub Container Registry
         run: |
-          docker images
-          docker rmi $(docker images -f "dangling=true" -q) || true  # Ignore errors if no dangling images
-
-      - name: Tag and Push to GitHub Container Registry
-        run: |
-          REGISTRY_URL="ghcr.io"  # Define your registry URL
-          docker images --format '{{.Repository}}:{{.Tag}}' | while read image; do
-            if [[ $image == *"godot"* ]] && [[ $image != *"/"* ]]; then
-              REPO_NAME=$(echo $image | awk -F ':' '{print $1}')
-              TAG=$(echo $image | awk -F ':' '{print $2}')
-
-              IMAGE_NAME="${REGISTRY_URL}/${{ github.repository_owner }}/$REPO_NAME"
-
-              echo "Tagging $image as $IMAGE_NAME:$TAG"
-              docker tag "$image" "$IMAGE_NAME:$TAG"
-
-              echo "Pushing $IMAGE_NAME:$TAG to $REGISTRY_URL"
-              docker push "$IMAGE_NAME:$TAG"
-            fi
-          done
+          chmod +x "${GITHUB_WORKSPACE}/build-containers/upload.sh" \
+          && "${GITHUB_WORKSPACE}/build-containers/upload.sh"

@@ -95,7 +95,7 @@ prepare_godot_source
 
 WINDOWS_CONTAINER="ghcr.io/nongvantinh/godot-windows:${CONTAINER_VERSION}-${IMG_VERSION}"
 LINUX_CONTAINER="ghcr.io/nongvantinh/godot-linux:${CONTAINER_VERSION}-${IMG_VERSION}"
-WEB_CONTAINER="ghcr.io/nongvantinh/godot-web:${CONTAINER_VERSION}-${IMG_VERSION}"
+# WEB_CONTAINER="ghcr.io/nongvantinh/godot-web:${CONTAINER_VERSION}-${IMG_VERSION}"
 # MACOS_CONTAINER="ghcr.io/nongvantinh/godot-osx:${CONTAINER_VERSION}-${IMG_VERSION}"
 # ANDROID_CONTAINER="ghcr.io/nongvantinh/godot-android:${CONTAINER_VERSION}-${IMG_VERSION}"
 # IOS_CONTAINER="ghcr.io/nongvantinh/godot-ios:${CONTAINER_VERSION}-${IMG_VERSION}"
@@ -109,11 +109,11 @@ ${docker_run} -v ${basedir}/build-mono-glue:/root/build ${LINUX_CONTAINER} bash 
 mkdir -p ${basedir}/out/windows
 ${docker_run} -v ${basedir}/build-windows:/root/build -v ${basedir}/out/windows:/root/out -v ${basedir}/deps/angle:/root/angle -v ${basedir}/deps/mesa:/root/mesa --env STEAM=${build_steam} ${WINDOWS_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/windows
 
-mkdir -p ${basedir}/out/linux
-${docker_run} -v ${basedir}/build-linux:/root/build -v ${basedir}/out/linux:/root/out ${LINUX_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/linux
+# mkdir -p ${basedir}/out/linux
+# ${docker_run} -v ${basedir}/build-linux:/root/build -v ${basedir}/out/linux:/root/out ${LINUX_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/linux
 
-mkdir -p ${basedir}/out/web
-${docker_run} -v ${basedir}/build-web:/root/build -v ${basedir}/out/web:/root/out ${WEB_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/web
+# mkdir -p ${basedir}/out/web
+# ${docker_run} -v ${basedir}/build-web:/root/build -v ${basedir}/out/web:/root/out ${WEB_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/web
 
 # mkdir -p ${basedir}/out/macos
 # ${docker_run} -v ${basedir}/build-macos:/root/build -v ${basedir}/out/macos:/root/out -v ${basedir}/deps/moltenvk:/root/moltenvk -v ${basedir}/deps/angle:/root/angle ${MACOS_CONTAINER} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/macos
