@@ -53,8 +53,9 @@ jobs:
 
       - name: Build Godot Containers with Docker
         run: |
-          chmod +x "${GITHUB_WORKSPACE}/build-containers/build.sh" \
-          && "${GITHUB_WORKSPACE}/build-containers/build.sh" 4.3 f40  # Replace with the correct Godot branch and Fedora version as needed
+          cd ${GITHUB_WORKSPACE}/build-containers
+          chmod +x build.sh
+          ./build.sh 4.3 f40  # Replace with the correct Godot branch and Fedora version as needed
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -65,5 +66,5 @@ jobs:
 
       - name: Run Cleanup and Push to GitHub Container Registry
         run: |
-          chmod +x "${GITHUB_WORKSPACE}/build-containers/upload.sh" \
-          && "${GITHUB_WORKSPACE}/build-containers/upload.sh"
+          chmod +x upload.sh
+          ./upload.sh

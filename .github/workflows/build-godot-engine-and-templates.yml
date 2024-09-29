@@ -31,8 +31,9 @@ jobs:
 
       - name: Run build.sh to Invoke Docker Builds
         run: |
-          chmod +x "build-godot-and-templates/build.sh" \
-          && "build-godot-and-templates/build.sh"
+          cd build-godot-and-templates
+          chmod +x build.sh
+          ./build.sh
 
       # - name: Prepare artifacts for release
       #   id: export
