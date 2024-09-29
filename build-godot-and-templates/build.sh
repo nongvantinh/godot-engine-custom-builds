@@ -13,6 +13,7 @@ git_treeish="4.3"  # You can change this as needed or pass it as an argument
 CONTAINER_VERSION="4.3"
 build_classical=1
 build_mono=0
+echo "CACHED_GODOT_SOURCE_PATH: ${CACHED_GODOT_SOURCE_PATH}"
 
 # Set up necessary directories for dependencies and outputs
 mkdir -p ${basedir}/deps
@@ -54,37 +55,59 @@ download_dependencies() {
 
 # Clone the Godot repository and create a tarball if needed
 prepare_godot_source() {
-  echo "Prepare godot source"
-  if [ ! -f "${basedir}/godot-${GODOT_VERSION}.tar.gz" ]; then
+  echo "Prepare Godot source"
+  
+  if [ -f "${basedir}/godot-${GODOT_VERSION}.tar.gz" ]; then
+    echo "Tarball already exists. Skipping clone."
+    return
+  fi
+
+  if [ -d "${CACHED_GODOT_SOURCE_PATH}" ]; then
+    echo "Using cached Godot source."
+    pushd "${CACHED_GODOT_SOURCE_PATH}"
+    
+    # Fetch latest changes and rebase
+    git fetch origin
+    git checkout "${git_treeish}"
+    git rebase "origin/${git_treeish}"
+    popd
+  else
     echo "Cloning Godot repository..."
-    git clone https://github.com/godotengine/godot.git || true
-    pushd godot
-    git checkout -b ${git_treeish} origin/${git_treeish} || git checkout ${git_treeish}
+    git clone https://github.com/godotengine/godot.git "${CACHED_GODOT_SOURCE_PATH}" || exit 1
+    pushd "${CACHED_GODOT_SOURCE_PATH}"
+    git checkout -b "${git_treeish}" "origin/${git_treeish}" || git checkout "${git_treeish}"
     git reset --hard
     git clean -fdx
-    git pull origin ${git_treeish} || true
-    
-    # Validate version
-    correct_version=$(python3 << EOF
-import version;
-if hasattr(version, "patch") and version.patch != 0:
-  git_version = f"{version.major}.{version.minor}.{version.patch}"
-else:
-  git_version = f"{version.major}.{version.minor}"
-print(git_version == "${GODOT_VERSION}")
-EOF
-    )
-    
-    if [[ "$correct_version" != "True" ]]; then
-      echo "Version in version.py $correct_version doesn't match the passed ${GODOT_VERSION}."
-      exit 1
-    fi
-    
-    # Create tarball
-    echo "Creating Godot tarball..."
-    sh misc/scripts/make_tarball.sh -v ${GODOT_VERSION} -g ${git_treeish}
+    git pull origin "${git_treeish}" || true
     popd
   fi
+
+  # Copy the Godot folder to the current directory
+  cp -r "${CACHED_GODOT_SOURCE_PATH}/." "${basedir}/godot"
+
+  pushd "${basedir}/godot"
+  
+  # Validate version
+  correct_version=$(python3 << EOF
+import version
+if hasattr(version, "patch") and version.patch != 0:
+    git_version = f"{version.major}.{version.minor}.{version.patch}"
+else:
+    git_version = f"{version.major}.{version.minor}"
+print(git_version == "${GODOT_VERSION}")
+EOF
+  )
+
+  if [[ "$correct_version" != "True" ]]; then
+    echo "Version in version.py $correct_version doesn't match the passed ${GODOT_VERSION}."
+    exit 1
+  fi
+  
+  # Create tarball
+  echo "Creating Godot tarball..."
+  sh misc/scripts/make_tarball.sh -v "${GODOT_VERSION}" -g "${git_treeish}"
+  
+  popd
 }
 
 # Download dependencies if not present

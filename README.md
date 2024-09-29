@@ -130,7 +130,21 @@ Download the Ubuntu 24.04 ISO file from the official Ubuntu website and flash it
 
 If you have the resources, you can buy a machine and install Ubuntu directly on it. If you don't have a powerful laptop, you can use a cloud service provider (such as Azure or AWS) for this purpose.
 
-The most important requirement is that you must have a strong machine running Ubuntu 24.04, as I have only tested this project on that version.
+The most important requirement is that you must have a strong machine running Ubuntu 24.04, as I have only tested this project on that version. Additionally, a strong network connection is essential. I encountered various instances where the clone source in the bash script failed; the notorious source is `godot`. As a workaround, I cached this project, fetched the latest changes from `origin`, and then copied the cached project to the current build project to proceed. However, this does not guarantee success, as some steps in the container build still require cloning the source from other projects, which can fail if the network connection is slow.
+
+Here is the example error:
+
+```
+Cloning into 'godot'...
+remote: Enumerating objects: 732221, done.
+remote: Counting objects: 100% (209/209), done.
+remote: Compressing objects: 100% (139/139), done.
+error: RPC failed; curl 92 HTTP/2 stream 5 was not closed cleanly: CANCEL (err 8)
+error: 6591 bytes of body are still expected
+fetch-pack: unexpected disconnect while reading sideband packet
+fatal: early EOF
+fatal: fetch-pack: invalid index-pack output
+```
 
 ### 2. Set Up GitHub Self-Hosted Runner
 
