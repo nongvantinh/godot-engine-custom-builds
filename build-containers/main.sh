@@ -310,13 +310,13 @@ build_containers() {
                 fi
             done
             
-
-            if ! is_container_built --container "$container_type" --tag "$img_version"; then
-                echo "Building for ${container_type}"
-                build_docker --container-type "$container_type" --image-version "$img_version"
-            fi
-
         fi
+
+        if ! is_container_built --container "$container_type" --tag "$img_version"; then
+            echo "Building for ${container_type}"
+            build_docker --container-type "$container_type" --image-version "$img_version"
+        fi
+
     done
 }
 
