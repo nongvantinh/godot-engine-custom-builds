@@ -408,7 +408,7 @@ main() {
     echo "Username: ${username}"
     echo "Docker build command executed for: ${container_types[*]}"
 
-    build_containers --image-version "${img_version}" --container-types "${container_types}"
+    build_containers --image-version "${img_version}" --container-types ${container_types[*]}
 
     local upload_sh_path
     local file="upload.sh"
