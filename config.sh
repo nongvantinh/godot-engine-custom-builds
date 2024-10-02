@@ -1,4 +1,22 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+# Registry where the containers will be staged and pushed.
+export REGISTRY="ghcr.io"
+export USERNAME="nongvantinh"
+export PAT_TOKEN="40 random characters after github personal token has been generated"
+
+export GIT_TREEISH="4.3"
+export BASE_DISTRO="f40"
+export CONTAINER_TYPE="all"
+export XCODE_SDK=15.4
+export OSX_SDK=14.5
+export IOS_SDK=17.5
+
+export BUILD_TYPE="all"
+export GODOT_VERSION="4.3.1"
+export FORCE_DOWNLOAD=false
+export SKIP_DOWNLOAD=false
+export SKIP_GIT_CHECKOUT=false
 
 # Configuration file for user-specific details.
 # This file is gitignore'd and will be sourced by build scripts.
@@ -7,19 +25,6 @@
 # as $ won't be expanded, by using single quotes to enclose the string,
 # or escaping with \$.
 
-# These scripts are designed and tested against podman. They may also work
-# with docker, but it's not guaranteed. You can set this variable to the
-# relevant tool in your PATH or an absolute path to run it from.
-export PODMAN='podman'
-
-# Registry for build containers.
-# The default registry is the one used for official Godot builds.
-# Note that some of its images are private and only accessible to selected
-# contributors.
-# You can build your own registry with scripts at
-# https://github.com/godotengine/build-containers
-export REGISTRY='registry.prehensile-tales.com'
-
 # Version string of the images to use in build.sh.
 export IMAGE_VERSION='4.x-f36'
 
@@ -27,7 +32,7 @@ export IMAGE_VERSION='4.x-f36'
 export BUILD_NAME='custom_build'
 
 # Default number of parallel cores for each build.
-export NUM_CORES=16
+export NUM_CORES=$(nproc --ignore=1)
 
 # Set up your own signing keystore and relevant details below.
 # If you do not fill all SIGN_* fields, signing will be skipped.

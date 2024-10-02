@@ -1,7 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
-set -x  # Enable debugging
 
 # Config
 export SCONS="scons -j${NUM_CORES} verbose=yes warnings=no progress=no"

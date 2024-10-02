@@ -12,16 +12,16 @@ When I first started, I simply wanted to create a game of my own in the genres I
 
 ## Pre-requisite
 
-First, please note that the GitHub Runner offered by GitHub has a limited amount of RAM, and the number of cores (4 cores for free subscriptions) is insufficient for the goals of this project. When I attempted to use GitHub's runner, it failed to compile custom Clang and encountered issues at the linking stage. Additionally, when using the container to compile the Godot Engine, it took 3-4 hours, which is too long. Eventually, if a running job takes too long, it will be terminated by GitHub. Therefore, hosting your own runner is required to use this project.
+First, please note that the GitHub Runner offered by GitHub has a limited amount of RAM, and the number of cores (4 cores for free subscriptions) is insufficient for the goals of this project. When I attempted to use GitHub's runner, it failed to compile custom Clang and encountered issues at the linking stage. Additionally, when using the container to compile the Godot Engine for Windows, it took 3-4 hours, which is too long. Eventually, if a running job takes too long, it will be terminated by GitHub. GitHub Actions workflows have a maximum runtime limit of 6 hours. If a workflow exceeds this time, it will be automatically terminated. This applies to both scheduled workflows and those triggered by events like pushes or pull requests. Therefore, you must have your own machine in other to folow the steps below.
 
-The requirements for the machine that will be used as a GitHub runner are:
+The requirements for the machine that will be used are:
 
 - **RAM**: At least 16 GB
 - **Cores**: 8
 - **Threads**: 16
 - **OS**: Ubuntu 24.04
 
-Here are the details of the machine I use to host as a GitHub runner:
+Here are the details of the machine I use:
 
 ```
 System:
@@ -146,62 +146,18 @@ fatal: early EOF
 fatal: fetch-pack: invalid index-pack output
 ```
 
-### 2. Set Up GitHub Self-Hosted Runner
 
-When setting up a GitHub Self-Hosted Runner, make sure to install it as a service and run it as **root** (otherwise, you will not be able to use `docker`). Create the runner as usual, but in the `Configure` step, after calling `./config.sh --url`, use this command instead of `./run.sh`: 
-
-```bash
-sudo ./svc.sh install root
-sudo ./svc.sh start
-```
-
-### 3. Install Docker
+### 2. Install Docker
 
 Follow the instructions under **Install using the apt repository** to install Docker: [Docker Installation Guide](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository).
 
-### 4. Set Up macOS Container with Xcode SDK
+1. Authenticate with GitHub Container Registry
 
-To prepare your macOS container, you need to install the [Xcode SDK](https://developer.apple.com/services-account/download?path=/Developer_Tools/Xcode_15.4/Xcode_15.4.xip) (we are currently using version 15.4). For more information, refer to this [StackOverflow answer](https://stackoverflow.com/a/10335943/12234661).
+First, you need to authenticate with the registry. You can do this using a personal access token (PAT) that has the write:packages and read:packages scopes.
+Using Docker CLI:
 
-#### Downloading and Hosting the Xcode SDK
+bash
 
-Once you've downloaded the Xcode SDK, it should be named exactly `Xcode_15.4.xip`. Next, you’ll need to host this file online so that the GitHub Actions workflow can access it. We’ll use Google Drive for this purpose.
+echo $TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
 
-**Step 1: Upload the File to Google Drive**
-
-1. Upload the `Xcode_15.4.xip` file to your Google Drive.
-2. Make the file shareable by creating a link that allows anyone with the link to access it. For GitHub Actions, you'll need a direct download link.
-
-**Step 2: Obtain the Direct Download Link**
-
-Refer to this [StackOverflow answer](https://stackoverflow.com/a/63781195/12234661).
-
-1. Get the file ID from the shareable link, which typically looks like this:
-   ```
-   https://drive.google.com/file/d/FILE_ID/view?usp=sharing
-   ```
-   Here, `FILE_ID` is what you need.
-
-**Step 3: Set Up GitHub Secrets**
-
-1. Go to your GitHub repository.
-2. Navigate to **Settings** > **Secrets and variables** > **Actions** > **New repository secret**.
-3. Add a secret called `XCODE_SDK_LINK` and set its value to your `FILE_ID`.
-
-![XCODE_SDK_LINK.png](XCODE_SDK_LINK.png)
-
-**Important Considerations**
-
-- Ensure that the file's permissions allow anyone with the link to download it.
-
-By following these steps, you’ll enable seamless access to the Xcode `.xip` file during your GitHub Actions workflow.
-
-### 5. Set Up Repository Secrets
-
-There are many arguments that can be passed to the workflow without changing a single line of code, which is why I choose repository secrets as a place to store dynamic values.
-
-| Repository Secret Name | Description |
-|------------------------|-------------|
-| `HOST_USER_NAME`      | Since we're running the runner service as root, it will use the root account, which will affect the location where artifacts are cached. This parameter allows us to store the cached files in the account's home directory. If your account is `myaccount`, then the value for this variable would be `myaccount`. |
-| `XCODE_SDK_LINK`      | The `FILE_ID` of your uploaded Xcode SDK on Google Drive. It must be stored on Google Drive. If the ID is `15msybXPFz5xkST4iRJBOSorlQAozwpO7a9wafehWl7g`, you must give this secret that value: `15msybXPFz5xkST4iRJBOSorlQAozwpO7a9wafehWl7g`. |
-
+Replace $TOKEN with your GitHub PAT.
