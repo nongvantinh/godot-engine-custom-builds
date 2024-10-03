@@ -1,4 +1,8 @@
+ARG REPO_URL="https://github.com/nongvantinh/godot-engine-custom-builds"
+
 FROM fedora:40
+
+LABEL "org.opencontainers.image.source"="$REPO_URL"
 
 WORKDIR /root
 

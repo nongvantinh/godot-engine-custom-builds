@@ -1,5 +1,8 @@
-ARG img_version=latest
-FROM godot-osx:${img_version}
+ARG IMAGE_VERSION=latest
+ARG REPO_URL="https://github.com/nongvantinh/godot-engine-custom-builds"
+FROM godot-osx:${IMAGE_VERSION}
+
+LABEL "org.opencontainers.image.source"="$REPO_URL"
 
 # Copy the necessary files into the image
 COPY files /root/files

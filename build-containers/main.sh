@@ -9,7 +9,7 @@ usage() {
     echo "  -r, --registry <registry>       Specify the Docker registry."
     echo "  -u, --username <username>       Specify the username for the registry."
     echo "  -p, --password <password>       Specify the password for the registry."
-    echo "  -g, --godot <branch>            Specify the Godot branch (default: $GIT_TREEISH)."
+    echo "  -g, --godot <branch>            Specify the Godot branch (default: $GIT_BRANCH)."
     echo "  -d, --distro <distro>           Specify the base distribution for Docker images (default: $BASE_DISTRO)."
     echo "  -c, --container-type <type>     Specify the type of Docker image to build (default: $CONTAINER_TYPE)."
     echo "  -h, --help                      Show this help message."
@@ -185,11 +185,13 @@ build_docker() {
         esac
     done
 
-    docker build \
-        --no-cache \
-        --build-arg img_version=${img_version} \
-        -t godot-"$container_type:${img_version}" \
-        -f Dockerfile."$container_type" . \
+    docker build                                                                \
+        --no-cache                                                              \
+        --debug                                                                 \
+        --build-arg IMAGE_VERSION=${img_version}                                \
+        --build-arg REPO_URL="https://github.com/$USERNAME/$REPO_NAME"      \
+        -t godot-"$container_type:${img_version}"                               \
+        -f Dockerfile."$container_type" .                                       \
         2>&1 | tee logs/"$container_type".log
 }
 
@@ -352,7 +354,7 @@ is_container_built() {
 main() {
     local registry="${REGISTRY}"
     local username="${USERNAME}"
-    local godot_branch="${GIT_TREEISH}"
+    local godot_branch="${GIT_BRANCH}"
     local base_distro="${BASE_DISTRO}"
     local arg_container_types=()
 

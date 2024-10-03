@@ -4,19 +4,23 @@
 export REGISTRY="ghcr.io"
 export USERNAME="nongvantinh"
 export PAT_TOKEN="40 random characters after github personal token has been generated"
+export REPO_NAME="godot-engine-custom-builds"
 
-export GIT_TREEISH="4.3"
+export GIT_BRANCH="4.3"
+export CONTAINER_VERSION="$GIT_BRANCH"
+export GODOT_VERSION="4.3.1"
+export FORCE_DOWNLOAD=0
+export SKIP_DOWNLOAD=1
+export SKIP_GIT_CHECKOUT=0
+
 export BASE_DISTRO="f40"
 export CONTAINER_TYPE="all"
 export XCODE_SDK=15.4
 export OSX_SDK=14.5
 export IOS_SDK=17.5
 
+# all|classical|mono
 export BUILD_TYPE="all"
-export GODOT_VERSION="4.3.1"
-export FORCE_DOWNLOAD=false
-export SKIP_DOWNLOAD=false
-export SKIP_GIT_CHECKOUT=false
 
 # Configuration file for user-specific details.
 # This file is gitignore'd and will be sourced by build scripts.
