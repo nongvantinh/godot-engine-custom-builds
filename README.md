@@ -10,7 +10,37 @@ Before we begin, I want to share the motivation behind this project so you can e
 When I first started, I simply wanted to create a game of my own in the genres I enjoy. However, I gradually realized that the number of employees at the Godot Foundation is small, and they can only add essential features that everyone needs while modifying the codebase to make it easier to maintain. As contributors, we implement the proposed features we like and create pull requests for them to merge. Unfortunately, some features may not be merged by the code owners because they believe these can be accomplished using other software then importing modified assets into Godot. This is where I disagree; thus, I decided to maintain my own version of Godot. However, compiling it locally and manually publishing it to stores was too much work for me. I needed a way to automate the process of compiling my custom version of the Godot Engine and publishing the release on GitHub. This way, for every change I make to the engine, I would only have to wait around 1-2 hours for the Docker containers to spin up and publish the artifacts for me.
 
 
-## Pre-requisite
+## Pre-requisites
+
+First, ensure your package lists are up to date and install the required software:
+
+```bash
+sudo apt-get update
+sudo apt install -y python-is-python3 openjdk-11-jdk dotnet-sdk-8.0 aspnetcore-runtime-8.0
+```
+
+### Generate Android Keystore
+
+1. Navigate to the root of this project, then create the `data` directory.
+2. Open a terminal and run the following command to generate your keystore:
+
+   ```bash
+   keytool -genkey -v -keystore godot-release.keystore -alias godot-release -keyalg RSA -keysize 2048 -dname "CN=Nông Văn Tình, OU=IT Software, O=Undeton, L=Cao Bang, ST=Cao Bang, C=VN" -validity 10000
+   ```
+
+3. After generating the keystore, update the following environment variables in `config.sh`:
+   - `GODOT_ANDROID_SIGN_KEYSTORE`
+   - `GODOT_ANDROID_KEYSTORE_ALIAS`
+   - `GODOT_ANDROID_SIGN_PASSWORD`
+
+   Ensure that `GODOT_ANDROID_SIGN_KEYSTORE` points to the generated keystore using an absolute path. For example, use:
+
+   ```bash
+   /home/my-account/Projects/godot-engine-custom-builds/data/godot-release.keystore
+   ```
+
+   **Note:** Avoid using `~/` in the path; specify the full path to ensure proper referencing.
+
 
 First, please note that the GitHub Runner offered by GitHub has a limited amount of RAM, and the number of cores (4 cores for free subscriptions) is insufficient for the goals of this project. When I attempted to use GitHub's runner, it failed to compile custom Clang and encountered issues at the linking stage. Additionally, when using the container to compile the Godot Engine for Windows, it took 3-4 hours, which is too long. Eventually, if a running job takes too long, it will be terminated by GitHub. GitHub Actions workflows have a maximum runtime limit of 6 hours. If a workflow exceeds this time, it will be automatically terminated. This applies to both scheduled workflows and those triggered by events like pushes or pull requests. Therefore, you must have your own machine in other to folow the steps below.
 

@@ -2,49 +2,111 @@
 
 set -e
 
-godot_usage() {
+usage() {
     echo "Usage: $0 godot [OPTIONS...]"
     echo
     echo "Available options for Godot:"
-    echo "  -r, --registry <registry>                Specify the Docker registry."
-    echo "  -u, --username <username>                Specify the username for the registry."
-    echo "  -p, --password <password>                Specify the password for the registry."
-    echo "  -gv, --godot_version <version>            Specify the Godot version (e.g. 3.1-alpha5) [mandatory]."
-    echo "  -g, --git <treeish>                      Specify the git treeish (e.g. master)."
-    echo "  -b, --build <type>                       Specify the build type (all|classical|mono, default: $BUILD_TYPE)."
-    echo "  -f, --force                               Force redownload of all images."
-    echo "  -s, --skip                                Skip downloading."
-    echo "  -c, --skip-git-checkout                   Skip skip git checkout."
+    echo "  --registry <registry>                Specify the Docker registry."
+    echo "  --username <username>                Specify the username for the registry."
+    echo "  --godot-version <version>            Specify the Godot version (e.g. 3.1-alpha5) [mandatory]."
+    echo "  --git <treeish>                      Specify the git treeish (e.g. master)."
+    echo "  --build <type>                       Specify the build type (all|classical|mono, default: $BUILD_TYPE)."
+    echo "  --force                               Force redownload of all images."
+    echo "  --skip                                Skip downloading."
+    echo "  --skip-git-checkout                   Skip skip git checkout."
     echo "  -h, --help                                Show this help message."
     echo
 }
 
-godot_initialize() {
-    local setup_sh_path
-    local setup_file="setup.sh"
-    find_file_upwards --file "$setup_file" --path-ref setup_sh_path
-    if [[ $? -eq 0 ]]; then
-        chmod +x "$setup_sh_path"
-        source "$setup_sh_path"
-    else
-        echo "Failed to find $setup_file"
-    fi
-    
-    local config_sh_path
-    local config_file="config.sh"
-    find_file_upwards --file "$config_file" --path-ref config_sh_path
-    if [[ $? -eq 0 ]]; then
-        chmod +x "$setup_sh_path"
-        source "$setup_sh_path"
-    else
-        echo "Failed to find $config_file"
-    fi
+build_usage() {
+    echo "Usage: build [OPTIONS]"
+    echo ""
+    echo "Build the Godot engine and its templates."
+    echo ""
+    echo "Options:"
+    echo "  --basedir <path>           Specify the base directory for the build."
+    echo "  --registry <registry_url>  Specify the registry URL for dependencies."
+    echo "  --username <username>      Specify the username for the registry."
+    echo "  --godot-version <version>  Specify the version of Godot to build."
+    echo "  --container-version <version>  Specify the version of the container."
+    echo "  --git-branch <branch>      Specify the git branch to checkout."
+    echo "  --build-type <type>        Specify the type of build (e.g., debug, release)."
+    echo "  --build-name <name>        Specify a name for the build."
+    echo "  --force-download <true|false>  Force download of dependencies."
+    echo "  --skip-download <true|false>    Skip downloading dependencies."
+    echo "  --skip-git-checkout <true|false> Skip the git checkout step."
+    echo "  --num-cores <number>       Specify the number of cores to use for the build."
+    echo "  -h, --help                 Show this help message."
+    echo ""
+    echo "Example:"
+    echo "  build --godot-version 3.3.4 --build-type release"
 }
 
-# Function to download dependencies if missing
-godot_download_dependencies() {
-    echo "Downloading dependencies"
-    local basedir
+pull_images() {
+    echo "Fetching images"
+
+    local registry="${REGISTRY}"
+    local username="${USERNAME}"
+    local container_version="${CONTAINER_VERSION}"
+    local image_version="${BASE_DISTRO}"
+
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --registry)
+                registry="$2"
+                shift 2
+                ;;
+            --username)
+                username="$2"
+                shift 2
+                ;;
+            --container-version)
+                container_version="$2"
+                shift 2
+                ;;
+            --image-version)
+                image_version="$2"
+                shift 2
+                ;;
+            *)
+                echo "Invalid option: $1"
+                return 1
+                ;;
+        esac
+    done
+
+    login_to_github_container_registry
+
+    echo "Fetching images from GitHub Container Registry..."
+
+    local windows_container="${registry}/${username}/godot-windows:${container_version}-${image_version}"
+    local linux_container="${registry}/${username}/godot-linux:${container_version}-${image_version}"
+    local web_container="${registry}/${username}/godot-web:${container_version}-${image_version}"
+    local macos_container="${registry}/${username}/godot-osx:${container_version}-${image_version}"
+    local android_container="${registry}/${username}/godot-android:${container_version}-${image_version}"
+    local ios_container="${registry}/${username}/godot-ios:${container_version}-${image_version}"
+    
+    local images=(
+        "$windows_container"
+        "$linux_container"
+        "$web_container"
+        "$macos_container"
+        "$android_container"
+        "$ios_container"
+    )
+
+    for image in $images; do
+        echo "Pulling image: $image"
+        docker pull "$image"
+    done
+
+    echo "Local images:"
+    docker images | grep "$registry/$username"
+}
+
+download_moltenvk() {
+    echo "Downloading MoltenVK...."
+    local basedir=$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd)
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
             --basedir)
@@ -58,13 +120,38 @@ godot_download_dependencies() {
         esac
     done
 
-    mkdir -p ${basedir}/deps
-    
-    # Download ANGLE libraries
+    if [ ! -d "${basedir}/deps/moltenvk" ]; then
+        echo "Missing MoltenVK for macOS, downloading it."
+        mkdir -p "${basedir}/deps/moltenvk"
+        pushd "${basedir}/deps/moltenvk"
+        curl -L -o moltenvk.tar https://github.com/godotengine/moltenvk-osxcross/releases/download/vulkan-sdk-1.3.283.0-2/MoltenVK-all.tar
+        tar xf moltenvk.tar && rm -f moltenvk.tar
+        mv MoltenVK/MoltenVK/include/ MoltenVK/
+        mv MoltenVK/MoltenVK/static/MoltenVK.xcframework/ MoltenVK/
+        popd
+    fi
+}
+
+download_angle() {
+    echo "Downloading ANGLE..."
+    local basedir=$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd)
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --basedir)
+                basedir="$2"
+                shift 2
+                ;;
+            *)
+                echo "Invalid option: $1"
+                return 1
+                ;;
+        esac
+    done
+
     if [ ! -d "${basedir}/deps/angle" ]; then
       echo "Downloading ANGLE libraries..."
-      mkdir -p ${basedir}/deps/angle
-      pushd ${basedir}/deps/angle
+      mkdir -p "${basedir}/deps/angle"
+      pushd "${basedir}/deps/angle"
       base_url=https://github.com/godotengine/godot-angle-static/releases/download/chromium%2F6601.2/godot-angle-static
       curl -L -o windows_arm64.zip $base_url-arm64-llvm-release.zip
       curl -L -o windows_x86_64.zip $base_url-x86_64-gcc-release.zip
@@ -74,12 +161,28 @@ godot_download_dependencies() {
       unzip -o windows_x86_32.zip && rm -f windows_x86_32.zip
       popd
     fi
+}
 
-    # Download Mesa libraries
+download_mesa() {
+    echo "Downloading mesa..."
+    local basedir=$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd)
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --basedir)
+                basedir="$2"
+                shift 2
+                ;;
+            *)
+                echo "Invalid option: $1"
+                return 1
+                ;;
+        esac
+    done
+
     if [ ! -d "${basedir}/deps/mesa" ]; then
       echo "Downloading Mesa libraries..."
-      mkdir -p ${basedir}/deps/mesa
-      pushd ${basedir}/deps/mesa
+      mkdir -p "${basedir}/deps/mesa"
+      pushd "${basedir}/deps/mesa"
       curl -L -o mesa_arm64.zip https://github.com/godotengine/godot-nir-static/releases/download/23.1.9-1/godot-nir-static-arm64-llvm-release.zip
       curl -L -o mesa_x86_64.zip https://github.com/godotengine/godot-nir-static/releases/download/23.1.9-1/godot-nir-static-x86_64-gcc-release.zip
       curl -L -o mesa_x86_32.zip https://github.com/godotengine/godot-nir-static/releases/download/23.1.9-1/godot-nir-static-x86_32-gcc-release.zip
@@ -90,10 +193,47 @@ godot_download_dependencies() {
     fi
 }
 
-# Clone the Godot repository and create a tarball if needed
-godot_prepare_godot_source() {
-    local basedir
-    local godot_version
+prepare_android_sign_keystore() {
+    echo "Preparing android signing keystore..."
+    local basedir=$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd)
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --basedir)
+                basedir="$2"
+                shift 2
+                ;;
+            *)
+                echo "Invalid option: $1"
+                return 1
+                ;;
+        esac
+    done
+
+    if [ ! -d "${basedir}/deps/keystore" ]; then
+        mkdir -p "${basedir}/deps/keystore"
+        local config_sh_path
+        local file="config.sh"
+        find_file_upwards --file "${file}" --path-ref config_sh_path
+        if [[ $? -eq 0 ]]; then
+            echo "Copying $config_sh_path to ${basedir}/deps/keystore/"
+            cp "$config_sh_path" "${basedir}/deps/keystore/"
+        else
+            echo "Failed to find $file"
+        fi
+
+        if [ ! -z "$GODOT_ANDROID_SIGN_KEYSTORE" ]; then
+            cp "$GODOT_ANDROID_SIGN_KEYSTORE" "${basedir}/deps/keystore/"
+            sed -i "${basedir}/deps/keystore/config.sh" -e "s@$GODOT_ANDROID_SIGN_KEYSTORE@/root/keystore/$GODOT_ANDROID_SIGN_KEYSTORE@"
+        fi
+    fi
+}
+
+prepare_godot_source() {
+    echo "Preparing Godot source..."
+    local basedir=$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd)
+    local godot_version="$GODOT_VERSION"
+    local skip_git_checkout="${SKIP_GIT_CHECKOUT}"
+
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
             --basedir)
@@ -104,6 +244,10 @@ godot_prepare_godot_source() {
                 godot_version="$2"
                 shift 2
                 ;;
+            --skip-git-checkout)
+                skip_git_checkout="$2"
+                shift 2
+                ;;
             *)
                 echo "Invalid option: $1"
                 return 1
@@ -111,59 +255,93 @@ godot_prepare_godot_source() {
         esac
     done
 
-    echo "Prepare Godot source"
     
     if [ -f "${basedir}/godot-${godot_version}.tar.gz" ]; then
       echo "Tarball already exists. Skipping clone."
       return
     fi
 
-    if [[ $skip_git_checkout == false ]]; then
-      echo "Cloning Godot repository..."
-      git clone https://github.com/godotengine/godot.git git || true
-      pushd git
-      git checkout -b "${git_treeish}" "origin/${git_treeish}" || git checkout "${git_treeish}"
-      git reset --hard
-      git clean -fdx
-      git pull origin "${git_treeish}" || true
+    if [[ $skip_git_checkout == 0 ]]; then
+        echo "Cloning Godot repository..."
+        git clone https://github.com/godotengine/godot.git "${basedir}/git" || true
+        pushd "${basedir}/git"
+        git checkout -b "${git_branch}" "origin/${git_branch}" || git checkout "${git_branch}"
+        git reset --hard
+        git clean -fdx
+        git pull origin "${git_branch}" || true
+        popd
     
-  # Validate version
-      correct_version=$(python3 << EOF
-    import version
-    if hasattr(version, "patch") and version.patch != 0:
-        git_version = f"{version.major}.{version.minor}.{version.patch}"
-    else:
-        git_version = f"{version.major}.{version.minor}"
-    print(git_version == "${godot_version}")
-EOF
-    )
+        # Validate version
+        correct_version=$(python3 validate_version.py "${godot_version}")
 
-    if [[ "$correct_version" != "True" ]]; then
-      echo "Version in version.py $correct_version doesn't match the passed ${godot_version}."
-      exit 1
-    fi
+        if [[ "$correct_version" != "Version is valid." ]]; then
+            echo "Version in version.py $correct_version doesn't match the passed ${godot_version}."
+            exit 1
+        fi
 
+        pushd "${basedir}/git"
+        echo "Creating Godot tarball..."
+        sh misc/scripts/make_tarball.sh -v "${godot_version}" -g "${git_branch}"
     
-    # Create tarball
-    echo "Creating Godot tarball..."
-    sh misc/scripts/make_tarball.sh -v "${godot_version}" -g "${git_treeish}"
-    
-      popd
+        popd
     fi
 }
 
-godot_build() {
+download_dependencies() {
+    echo "Downloading dependencies..."
+    local basedir=$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd)
+    local godot_version="$GODOT_VERSION"
+    local skip_git_checkout="${SKIP_GIT_CHECKOUT}"
+
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --basedir)
+                basedir="$2"
+                shift 2
+                ;;
+            --godot-version)
+                godot_version="$2"
+                shift 2
+                ;;
+            --skip-git-checkout)
+                skip_git_checkout="$2"
+                shift 2
+                ;;
+            *)
+                echo "Invalid option: $1"
+                return 1
+                ;;
+        esac
+    done
+
+    mkdir -p ${basedir}/deps
+
+    download_moltenvk --basedir "$basedir"
+    download_angle --basedir "$basedir"
+    download_mesa --basedir "$basedir"
+    prepare_android_sign_keystore --basedir "$basedir"
+    
+    prepare_godot_source    --basedir "$basedir"                            \
+                            --godot-version "$godot_version"                \
+                            --skip-git-checkout "$skip_git_checkout"        
+}
+
+build() {
     echo "Building Godot engine and its templates"
 
-    local basedir
-    local registry
-    local username
-    local contaner_version
-    local img_version
-    local godot_version
-    local build_classical
-    local build_mono
-    local build_name="$BUILD_NAME"
+    local basedir=$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd)
+    local registry="${REGISTRY}"
+    local username="${USERNAME}"
+    local godot_version="${GODOT_VERSION}"
+    local container_version="${CONTAINER_VERSION}"
+    local image_version="${BASE_DISTRO}"
+    local git_branch="${GIT_BRANCH}"
+    local build_type="${BUILD_TYPE}"
+    local build_name="${BUILD_NAME}"
+    local force_download="${FORCE_DOWNLOAD}"
+    local skip_download="${SKIP_DOWNLOAD}"
+    local skip_git_checkout="${SKIP_GIT_CHECKOUT}"
+    local num_cores="${NUM_CORES}"
 
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -179,53 +357,91 @@ godot_build() {
                 username="$2"
                 shift 2
                 ;;
-            --contaner-version)
-                contaner_version="$2"
-                shift 2
-                ;;
-            --image-version)
-                img_version="$2"
-                shift 2
-                ;;
             --godot-version)
                 godot_version="$2"
                 shift 2
                 ;;
-            --build-classical)
-                build_classical="$2"
+            --container-version)
+                container_version="$2"
                 shift 2
                 ;;
-            --build-mono)
-                build_mono="$2"
+            --image-version)
+                image_version="$2"
+                shift 2
+                ;;
+            --git-branch)
+                git_branch="$2"
+                shift 2
+                ;;
+            --build-type)
+                build_type="$2"
                 shift 2
                 ;;
             --build-name)
                 build_name="$2"
                 shift 2
                 ;;
+            --force-download)
+                force_download="$2"
+                shift 2
+                ;;
+            --skip-download)
+                skip_download="$2"
+                shift 2
+                ;;
+            --skip-git-checkout)
+                skip_git_checkout="$2"
+                shift 2
+                ;;
+            --num-cores)
+                num_cores="$2"
+                shift 2
+                ;;
             -h|--help)
-                godot_build_usage
+                build_usage
                 exit 0
                 ;;
             *)
                 echo "Invalid option: $1"
-                godot_build_usage
+                build_usage
                 exit 1
                 ;;
         esac
     done
 
-    local windows_container="${registry}/${username}/godot-windows:${contaner_version}-${img_version}"
-    local linux_container="${registry}/${username}/godot-linux:${contaner_version}-${img_version}"
-    local web_container="${registry}/${username}/godot-web:${contaner_version}-${img_version}"
-    local macos_container="${registry}/${username}/godot-osx:${contaner_version}-${img_version}"
-    local android_container="${registry}/${username}/godot-android:${contaner_version}-${img_version}"
-    local ios_container="${registry}/${username}/godot-ios:${contaner_version}-${img_version}"
+    pull_images                             --registry "$registry"                                  \
+                                            --username "$username"                                  \
+                                            --container-version "$container_version"                \
+                                            --image-version "$image_version"
+    
+    download_dependencies                   --basedir "$basedir"                                    \
+                                            --godot-version "$godot_version"                        \
+                                            --skip-git-checkout "$skip_git_checkout"
+
+    local windows_container="${registry}/${username}/godot-windows:${container_version}-${image_version}"
+    local linux_container="${registry}/${username}/godot-linux:${container_version}-${image_version}"
+    local web_container="${registry}/${username}/godot-web:${container_version}-${image_version}"
+    local macos_container="${registry}/${username}/godot-osx:${container_version}-${image_version}"
+    local android_container="${registry}/${username}/godot-android:${container_version}-${image_version}"
+    local ios_container="${registry}/${username}/godot-ios:${container_version}-${image_version}"
 
     mkdir -p ${basedir}/out
     mkdir -p ${basedir}/out/logs
 
-    docker_run="docker run --rm --env BUILD_NAME="$build_name" --env GODOT_VERSION_STATUS --env NUM_CORES --env CLASSICAL=${build_classical} --env MONO=${build_mono} -v ${basedir}/godot-${godot_version}.tar.gz:/root/godot.tar.gz -v ${basedir}/mono-glue:/root/mono-glue -w /root/"
+    local build_classical=0
+    local build_mono=0
+
+    if [[ "$build_type" == "all" ]]; then
+        build_classical=1
+        build_mono=1
+    elif [[ "$build_type" == "classical" ]]; then
+        build_classical=1
+    elif [[ "$build_type" == "mono" ]]; then
+        build_mono=1
+    fi
+
+    mkdir -p ${basedir}/mono-glue
+    docker_run="docker run --rm --env BUILD_NAME="$build_name" --env GODOT_VERSION_STATUS="$GODOT_VERSION_STATUS" --env NUM_CORES="$num_cores" --env CLASSICAL=${build_classical} --env MONO=${build_mono} -v ${basedir}/godot-${godot_version}.tar.gz:/root/godot.tar.gz -v ${basedir}/mono-glue:/root/mono-glue -w /root/"
 
     mkdir -p ${basedir}/mono-glue
     ${docker_run} -v ${basedir}/build-mono-glue:/root/build ${linux_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/mono-glue
@@ -253,65 +469,82 @@ godot_build() {
     fi
 }
 
-godot_main() {
+main() {
     local basedir=$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd)
-    godot_initialize "$basedir"
-
-    local godot_version="${GODOT_VERSION}"
-    local git_treeish="${GIT_TREEISH}"
-    local build_type="${BUILD_TYPE}"
     local registry="${REGISTRY}"
     local username="${USERNAME}"
-    local password="${PASSWORD}"
+    local godot_version="${GODOT_VERSION}"
+    local container_version="${CONTAINER_VERSION}"
+    local git_branch="${GIT_BRANCH}"
+    local build_type="${BUILD_TYPE}"
+    local build_name="${BUILD_NAME}"
     local force_download="${FORCE_DOWNLOAD}"
     local skip_download="${SKIP_DOWNLOAD}"
     local skip_git_checkout="${SKIP_GIT_CHECKOUT}"
+    local num_cores="${NUM_CORES}"
+    local image_version="${BASE_DISTRO}"
 
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
-            -r|--registry)
+            --basedir)
+                basedir="$2"
+                shift 2
+                ;;
+            --registry)
                 registry="$2"
                 shift 2
                 ;;
-            -u|--username)
+            --username)
                 username="$2"
                 shift 2
                 ;;
-            -p|--password)
-                password="$2"
-                shift 2
-                ;;
-            -gv|--godot_version)
+            --godot-version)
                 godot_version="$2"
                 shift 2
                 ;;
-            -g|--git)
-                git_treeish="$2"
+            --container-version)
+                container_version="$2"
                 shift 2
                 ;;
-            -b|--build)
+            --base-distro)
+                image_version="$2"
+                shift 2
+                ;;
+            --git-branch)
+                git_branch="$2"
+                shift 2
+                ;;
+            --build-type)
                 build_type="$2"
                 shift 2
                 ;;
-            -f|--force)
-                force_download="true"
+            --build-name)
+                build_name="$2"
+                shift 2
+                ;;
+            --force-download)
+                force_download=1
                 shift
                 ;;
-            -s|--skip)
-                skip_download="true"
+            --skip-download)
+                skip_download=1
                 shift
                 ;;
-            -c|--skip-git-checkout)
-                skip_git_checkout=true
+            --skip-git-checkout)
+                skip_git_checkout=1
+                shift
+                ;;
+            --num-cores)
+                num_cores="$2"
                 shift
                 ;;
             -h|--help)
-                godot_usage
+                usage
                 exit 0
                 ;;
             *)
                 echo "Invalid option: $1"
-                godot_usage
+                usage
                 exit 1
                 ;;
         esac
@@ -319,35 +552,34 @@ godot_main() {
 
     if [ -z "$godot_version" ]; then
         echo "Error: Godot version (-v) is mandatory."
-        godot_usage
+        usage
         exit 1
     fi
 
     echo "Building Godot engine with the following parameters:"
     echo "Version: $godot_version"
-    echo "Git treeish: ${git_treeish}"
+    echo "Git branch: ${git_branch}"
     echo "Build type: $build_type"
     echo "Registry: ${registry:-Not specified}"
     echo "Username: ${username:-Not specified}"
 
-    # Replace the following line with your Godot build command
-    # godot -build ... --godot_version "$godot_version" --type "$build_type"
-    echo "Godot build command executed with type $build_type and version $godot_version."
+    echo "Godot build command executed for ${build_type} using godot version ${godot_version} and ${build_name}."
 
-    echo "number of cores will be used: ${NUM_CORES}"
-    build_classical=1
-    build_mono=0
+    echo "number of cores will be used: ${num_cores}"
 
-    godot_download_dependencies --basedir "$basedir"
-    godot_prepare_godot_source  --basedir "$basedir"  --godot-version "$godot_version"
-    godot_build --basedir "$basedir"                  \
-                --registry "$registry"                \
-                --username "$username"                \
-                --contaner-version "$godot_branch"    \
-                --image-version "$base_distro"        \
-                --godot-version "$godot_version"      \
-                --build-classical "$build_classical"  \
-                --build-mono "$build_mono"            \
+    build       --basedir "$basedir"                                            \
+                --registry "$registry"                                          \
+                --username "$username"                                          \
+                --godot-version "$godot_version"                                \
+                --container-version "$container_version"                        \
+                --image-version "$image_version"                                \
+                --git-branch "$git_branch"                                      \
+                --build-type "$build_type"                                      \
+                --build-name "$build_name"                                      \
+                --force-download "$force_download"                              \
+                --skip-download "$skip_download"                                \
+                --skip-git-checkout "$skip_git_checkout"                        \
+                --num-cores "$num_cores"
 }
 
-godot_main "$@"
+main "$@"

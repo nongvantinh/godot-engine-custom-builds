@@ -9,6 +9,7 @@ export REPO_NAME="godot-engine-custom-builds"
 export GIT_BRANCH="4.3"
 export CONTAINER_VERSION="$GIT_BRANCH"
 export GODOT_VERSION="4.3.1"
+export GODOT_VERSION_STATUS="rc"
 export FORCE_DOWNLOAD=0
 export SKIP_DOWNLOAD=1
 export SKIP_GIT_CHECKOUT=0
@@ -85,8 +86,8 @@ export SIGNING_KEY=''
 
 # Android signing configs
 # Path to the Android keystore file used to sign the release build
-export GODOT_ANDROID_SIGN_KEYSTORE=''
+export GODOT_ANDROID_SIGN_KEYSTORE='/home/ubuntu/Projects/godot-engine-custom-builds/data/godot-release.keystore'
 # Key alias used for signing the release build
-export GODOT_ANDROID_KEYSTORE_ALIAS=''
+export GODOT_ANDROID_KEYSTORE_ALIAS='godot-release'
 # Password for the key used for signing the release build
-export GODOT_ANDROID_SIGN_PASSWORD=''
+export GODOT_ANDROID_SIGN_PASSWORD='The-password-you-used-when-generating-keystore'
