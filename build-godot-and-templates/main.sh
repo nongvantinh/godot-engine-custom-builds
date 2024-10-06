@@ -149,17 +149,21 @@ download_angle() {
     done
 
     if [ ! -d "${basedir}/deps/angle" ]; then
-      echo "Downloading ANGLE libraries..."
-      mkdir -p "${basedir}/deps/angle"
-      pushd "${basedir}/deps/angle"
-      base_url=https://github.com/godotengine/godot-angle-static/releases/download/chromium%2F6601.2/godot-angle-static
-      curl -L -o windows_arm64.zip $base_url-arm64-llvm-release.zip
-      curl -L -o windows_x86_64.zip $base_url-x86_64-gcc-release.zip
-      curl -L -o windows_x86_32.zip $base_url-x86_32-gcc-release.zip
-      unzip -o windows_arm64.zip && rm -f windows_arm64.zip
-      unzip -o windows_x86_64.zip && rm -f windows_x86_64.zip
-      unzip -o windows_x86_32.zip && rm -f windows_x86_32.zip
-      popd
+        echo "Downloading ANGLE libraries..."
+        mkdir -p "${basedir}/deps/angle"
+        pushd "${basedir}/deps/angle"
+        base_url=https://github.com/godotengine/godot-angle-static/releases/download/chromium%2F6601.2/godot-angle-static
+        curl -L -o windows_arm64.zip $base_url-arm64-llvm-release.zip
+        curl -L -o windows_x86_64.zip $base_url-x86_64-gcc-release.zip
+        curl -L -o windows_x86_32.zip $base_url-x86_32-gcc-release.zip
+        curl -L -o macos_arm64.zip $base_url-arm64-macos-release.zip
+        curl -L -o macos_x86_64.zip $base_url-x86_64-macos-release.zip
+        unzip -o windows_arm64.zip && rm -f windows_arm64.zip
+        unzip -o windows_x86_64.zip && rm -f windows_x86_64.zip
+        unzip -o windows_x86_32.zip && rm -f windows_x86_32.zip
+        unzip -o macos_arm64.zip && rm -f macos_arm64.zip
+        unzip -o macos_x86_64.zip && rm -f macos_x86_64.zip
+        popd
     fi
 }
 
