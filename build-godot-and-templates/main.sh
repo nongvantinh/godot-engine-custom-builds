@@ -474,6 +474,7 @@ main() {
     local registry="${REGISTRY}"
     local username="${USERNAME}"
     local godot_version="${GODOT_VERSION}"
+    local godot_version_status="$GODOT_VERSION_STATUS"
     local container_version="${CONTAINER_VERSION}"
     local git_branch="${GIT_BRANCH}"
     local build_type="${BUILD_TYPE}"
@@ -483,6 +484,12 @@ main() {
     local skip_git_checkout="${SKIP_GIT_CHECKOUT}"
     local num_cores="${NUM_CORES}"
     local image_version="${BASE_DISTRO}"
+
+    local disable_cleanup=0
+    local disable_generate_tarball=0
+
+    local build=0;
+    local release=0;
 
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -538,6 +545,22 @@ main() {
                 num_cores="$2"
                 shift
                 ;;
+            --disable-cleanup)
+                disable_cleanup=1
+                shift
+                ;;
+            --disable-generate-tarball)
+                disable_generate_tarball=1
+                shift
+                ;;
+            --build)
+                build=1
+                shift
+                ;;
+            --release)
+                release=1
+                shift
+                ;;
             -h|--help)
                 usage
                 exit 0
@@ -567,19 +590,36 @@ main() {
 
     echo "number of cores will be used: ${num_cores}"
 
-    build       --basedir "$basedir"                                            \
-                --registry "$registry"                                          \
-                --username "$username"                                          \
-                --godot-version "$godot_version"                                \
-                --container-version "$container_version"                        \
-                --image-version "$image_version"                                \
-                --git-branch "$git_branch"                                      \
-                --build-type "$build_type"                                      \
-                --build-name "$build_name"                                      \
-                --force-download "$force_download"                              \
-                --skip-download "$skip_download"                                \
-                --skip-git-checkout "$skip_git_checkout"                        \
-                --num-cores "$num_cores"
+    if [ $build -eq 1 ]; then
+        build       --basedir "$basedir"                                            \
+                    --registry "$registry"                                          \
+                    --username "$username"                                          \
+                    --godot-version "$godot_version"                                \
+                    --container-version "$container_version"                        \
+                    --image-version "$image_version"                                \
+                    --git-branch "$git_branch"                                      \
+                    --build-type "$build_type"                                      \
+                    --build-name "$build_name"                                      \
+                    --force-download "$force_download"                              \
+                    --skip-download "$skip_download"                                \
+                    --skip-git-checkout "$skip_git_checkout"                        \
+                    --num-cores "$num_cores"
+    fi
+
+    if [ $release -eq 1 ]; then
+        local release_sh_path
+        local file="prepare_release.sh"
+        find_file_upwards --file "${file}" --path-ref release_sh_path
+        if [[ $? -eq 0 ]]; then
+            chmod +x "$release_sh_path"
+            $release_sh_path "$godot_version" "$godot_version_status" "$disable_cleanup" "$disable_generate_tarball"
+
+        else
+            echo "Failed to find $file"
+        fi
+
+    fi
+
 }
 
 main "$@"

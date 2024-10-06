@@ -6,6 +6,9 @@ export USERNAME="nongvantinh"
 export PAT_TOKEN="40 random characters after github personal token has been generated"
 export REPO_NAME="godot-engine-custom-builds"
 
+export LOCAL_USER="ubuntu"
+
+
 export GIT_BRANCH="4.3"
 export CONTAINER_VERSION="$GIT_BRANCH"
 export GODOT_VERSION="4.3.1"
@@ -66,9 +69,10 @@ export APPLE_ID=''
 export APPLE_ID_PASSWORD=''
 
 # NuGet source for publishing .NET packages
-export NUGET_SOURCE='nuget.org'
-# API key for publishing NuGet packages to nuget.org
-export NUGET_API_KEY=''
+export NUGET_SOURCE='github'
+# API key for publishing NuGet packages to NUGET_SOURCE. This is
+export NUGET_API_KEY=$PAT_TOKEN
+export NUGET_SOURCE_URL="https://nuget.pkg.github.com/$USERNAME/index.json"
 
 # MavenCentral (sonatype) credentials
 export OSSRH_GROUP_ID=''
@@ -86,7 +90,7 @@ export SIGNING_KEY=''
 
 # Android signing configs
 # Path to the Android keystore file used to sign the release build
-export GODOT_ANDROID_SIGN_KEYSTORE='/home/ubuntu/Projects/godot-engine-custom-builds/data/godot-release.keystore'
+export GODOT_ANDROID_SIGN_KEYSTORE="/home/$LOCAL_USER/Projects/godot-engine-custom-builds/data/godot-release.keystore"
 # Key alias used for signing the release build
 export GODOT_ANDROID_KEYSTORE_ALIAS='godot-release'
 # Password for the key used for signing the release build

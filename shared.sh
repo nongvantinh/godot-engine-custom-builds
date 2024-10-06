@@ -2,6 +2,22 @@
 
 set -e
 
+# Function to switch to a normal user
+switch_to_user() {
+    if [ "$(id -u)" -eq 0 ]; then
+        exec su - your_username -c "$0 $@"
+        exit
+    fi
+}
+
+# Function to elevate to root user
+switch_to_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        exec sudo "$0" "$@"
+        exit
+    fi
+}
+
 find_file_upwards_usage() {
     echo "Usage: find_file_upwards [OPTIONS]"
     echo

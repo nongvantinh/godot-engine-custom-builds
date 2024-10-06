@@ -15,7 +15,8 @@ usage() {
 initialize() {
     chmod +x shared.sh
     source shared.sh
-
+    switch_to_user
+    
     local config_sh_path
     local file="config.sh"
     find_file_upwards --file "${file}" --path-ref config_sh_path

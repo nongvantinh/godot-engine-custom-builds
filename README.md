@@ -16,7 +16,10 @@ First, ensure your package lists are up to date and install the required softwar
 
 ```bash
 sudo apt-get update
-sudo apt install -y python-is-python3 openjdk-11-jdk dotnet-sdk-8.0 aspnetcore-runtime-8.0
+sudo apt install -y python-is-python3 openjdk-11-jdk      \
+                    dotnet-sdk-8.0 aspnetcore-runtime-8.0 \
+                    osslsigncode
+
 ```
 
 ### Generate Android Keystore
@@ -191,3 +194,16 @@ bash
 echo $TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
 
 Replace $TOKEN with your GitHub PAT.
+
+
+# Add the nuget source when using the binaries
+When using binary, you need to configure the source for nuget to be able to download the required packages:
+
+```
+dotnet nuget add source --name "$NUGET_SOURCE" "$NUGET_SOURCE_URL"
+```
+
+e.g: `dotnet nuget add source --name "github" "https://nuget.pkg.github.com/$USERNAME/index.json"`
+
+
+Replace **$USERNAME** with the real github username where you uploaded the packages.
