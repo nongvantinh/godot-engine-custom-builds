@@ -539,13 +539,34 @@ publish_packages() {
 }
 
 prepare() {
-    # prepare_for_classical
-    # prepare_for_mono
+    prepare_for_classical
+    prepare_for_mono
     publish_packages
 }
 
+release() {
+    mapfile -t files < <(find "$relative_directory" -type f -not -name "SHA512-SUMS.txt")
+
+    if [ ${#files[@]} -eq 0 ]; then
+        echo "No files found in $relative_directory. Aborting release."
+        return 1
+    fi
+
+    echo "Creating release $godot_version..."
+    echo "$PAT_TOKEN" | gh auth login --with-token
+
+    gh release create "$godot_version" \
+        "${files[@]}" \
+        --title "$godot_version" \
+        --notes "Release notes for version $godot_version" \
+        --generate-notes \
+        --latest
+
+    echo "Release $godot_version created successfully!"
+}
+
 main() {
-    local godot_version="$1"
+    godot_version="$1"
     local godot_version_status="$2"
     disable_cleanup=$3
     disable_generate_tarball=$4
@@ -577,6 +598,7 @@ main() {
     cleanup_and_setup
 
     prepare
+    release
 
     echo "All editor binaries and templates prepared successfully for release"
 }

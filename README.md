@@ -18,8 +18,14 @@ First, ensure your package lists are up to date and install the required softwar
 sudo apt-get update
 sudo apt install -y python-is-python3 openjdk-11-jdk      \
                     dotnet-sdk-8.0 aspnetcore-runtime-8.0 \
-                    osslsigncode
+                    osslsigncode gh
 
+```
+
+Create a github personal access token (classic) that has the following privileges:
+
+```bash
+repo, workflow, read/write/delete packages, admin org/public_key/repo_hook/org_hook, gist, project
 ```
 
 ### Generate Android Keystore
