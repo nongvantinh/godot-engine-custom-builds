@@ -15,7 +15,6 @@ usage() {
 initialize() {
     chmod +x shared.sh
     source shared.sh
-    switch_to_user
     
     local config_sh_path
     local file="config.sh"
