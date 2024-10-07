@@ -2,10 +2,14 @@
 
 # Registry where the containers will be staged and pushed.
 export REGISTRY="ghcr.io"
+# The username(namespace) where the packages will be uploaded.
 export USERNAME="nongvantinh"
+# GitHub personal access token (classic)
 export PAT_TOKEN="40 random characters after github personal token has been generated"
+# The name of the repository where packages will be uploaded.
 export REPO_NAME="godot-engine-custom-builds"
 
+# The account on your ubuntu 24.04
 export LOCAL_USER="ubuntu"
 
 
@@ -70,7 +74,7 @@ export APPLE_ID_PASSWORD=''
 
 # NuGet source for publishing .NET packages
 export NUGET_SOURCE='github'
-# API key for publishing NuGet packages to NUGET_SOURCE. This is
+# API key for publishing NuGet packages to NUGET_SOURCE.
 export NUGET_API_KEY=$PAT_TOKEN
 export NUGET_SOURCE_URL="https://nuget.pkg.github.com/$USERNAME/index.json"
 
