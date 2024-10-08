@@ -17,7 +17,7 @@ sign_windows() {
 }
 
 publish_nuget_packages() {
-  echo "NUGET_API_KEY: ${NUGET_API_KEY}"
+  echo "Publishing nuget packages"
 
     can_publish_nuget=0
     if [ ! -z "${NUGET_SOURCE}" ] && [ ! -z "${NUGET_API_KEY}" ] && [[ $(type -P "dotnet") ]]; then
@@ -120,6 +120,7 @@ prepare_for_linux_classical() {
 
     echo "Linux Classical preparation complete."
 }
+
 prepare_for_windows_classical() {
     ## Windows (Classical) ##
 

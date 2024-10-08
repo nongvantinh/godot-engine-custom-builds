@@ -29,27 +29,6 @@ cleanup_dangling_images() {
 
 tag_and_push_images() {
     echo "Tagging and pushing images..."
-
-    local registry="${REGISTRY}"
-    local username="${USERNAME}"
-
-    while [[ "$#" -gt 0 ]]; do
-        case "$1" in
-            --registry)
-                registry="$2"
-                shift 2
-                ;;
-            --username)
-                username="$2"
-                shift 2
-                ;;
-            *)
-                echo "Invalid option: $1"
-                return 1
-                ;;
-        esac
-    done
-
     docker images --format '{{.Repository}}:{{.Tag}}' | while read -r image; do
         if [[ ${image} == *"godot"* ]] && [[ ${image} != *"/"* ]]; then
             local image_name=$(echo "${image}" | awk -F ':' '{print $1}')
@@ -66,9 +45,9 @@ tag_and_push_images() {
 }
 
 main() {
-    local registry="${REGISTRY}"
-    local username="${USERNAME}"
-    local pat_token="${PAT_TOKEN}"
+    registry="${REGISTRY}"
+    username="${USERNAME}"
+    pat_token="${PAT_TOKEN}"
 
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -81,7 +60,7 @@ main() {
                 shift 2
                 ;;
             -t|--token)
-                password="$2"
+                pat_token="$2"
                 shift 2
                 ;;
             -h|--help)
@@ -100,8 +79,7 @@ main() {
                                         --username "${username}"     \
                                         --pat_token "${pat_token}"
     cleanup_dangling_images
-    tag_and_push_images     --registry "${registry}"     \
-                            --username "${username}"     \
+    tag_and_push_images
 
 }
 

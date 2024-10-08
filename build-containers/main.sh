@@ -29,38 +29,6 @@ select_container_type_usage() {
     echo
 }
 
-build_docker_usage() {
-    echo "Usage: ${FUNCNAME[1]} [OPTIONS]"
-    echo
-    echo "Build a Docker image with specified parameters."
-    echo
-    echo "Options:"
-    echo "  --container-type <type>   Specify the type of container to build."
-    echo "  --image-version <version>  Specify the version tag for the image."
-    echo "  -h, --help                      Display this help message."
-    echo
-    echo "Example:"
-    echo "  build_docker --container-type linux --image-version 1.0"
-    echo
-}
-
-ensure_apple_sdks_valid_usage() {
-    echo "Usage: ${FUNCNAME[1]} [OPTIONS]"
-    echo
-    echo "Check and specify the SDKs needed for building containers."
-    echo
-    echo "Options:"--image-version
-    echo "  --image-version <version>     Specify the version of the image."
-    echo "  --osx-sdk <version>       Specify the version of the macOS SDK."
-    echo "  --ios-sdk <version>       Specify the version of the iOS SDK."
-    echo "  --xcode-sdk <version>     Specify the version of Xcode SDK."
-    echo "  -h, --help                    Display this help message."
-    echo
-    echo "Example:"
-    echo "  ensure_valid_apple_sdks --osx-sdk 10.15 --ios-sdk 14.5 --xcode-sdk 12.4"
-    echo
-}
-
 select_container_type() {
     local -n container_types_ref
     declare -A seen  # Associative array to track seen container types
@@ -132,22 +100,7 @@ select_container_type() {
 }
 
 confirm_settings() {
-    local img_version
-    
-    while [[ "$#" -gt 0 ]]; do
-        case "$1" in
-            --image-version)
-                img_version="$2"
-                shift 2
-                ;;
-            *)
-                echo "Invalid option: $1"
-                return 1
-                ;;
-        esac
-    done
-
-    echo "Docker image tag: ${img_version}"
+    echo "Docker image tag: ${image_version}"
     echo
     while true; do
         read -p "Is this correct? [y/n] " yn
@@ -160,37 +113,14 @@ confirm_settings() {
 }
 
 build_docker() {
-    local container_type
-    local img_version
-    
-    while [[ "$#" -gt 0 ]]; do
-        case "$1" in
-            --container-type)
-                container_type="$2"
-                shift 2
-                ;;
-            --image-version)
-                img_version="$2"
-                shift 2
-                ;;
-            -h|--help)
-                build_docker_usage
-                shift 2
-                ;;
-            *)
-                echo "Invalid option: $1"
-                build_docker_usage
-                return 1
-                ;;
-        esac
-    done
+    local container_type="$1"
 
     docker build                                                                \
         --no-cache                                                              \
         --debug                                                                 \
-        --build-arg IMAGE_VERSION=${img_version}                                \
-        --build-arg REPO_URL="https://github.com/$USERNAME/$REPO_NAME"      \
-        -t godot-"$container_type:${img_version}"                               \
+        --build-arg IMAGE_VERSION=${image_version}                              \
+        --build-arg REPO_URL="https://github.com/$USERNAME/$REPO_NAME"          \
+        -t godot-"$container_type:${image_version}"                             \
         -f Dockerfile."$container_type" .                                       \
         2>&1 | tee logs/"$container_type".log
 }
@@ -200,40 +130,9 @@ ensure_valid_apple_sdks() {
     local basedir=$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd)
     local files_root="$basedir/files"
 
-    local img_version
     local osx_sdk="${OSX_SDK}"
     local ios_sdk="${IOS_SDK}"
     local xcode_sdk="${XCODE_SDK}"
-
-    while [[ "$#" -gt 0 ]]; do
-        case "$1" in
-            --image-version)
-                img_version="$2"
-                shift 2
-                ;;
-            --osx-sdk)
-                osx_sdk="$2"
-                shift 2
-                ;;
-            --ios-sdk)
-                ios_sdk="$2"
-                shift 2
-                ;;
-            --xcode-sdk)
-                xcode_sdk="$2"
-                shift 2
-                ;;
-            -h|--help)
-                ensure_apple_sdks_valid_usage
-                exit 0
-                ;;
-            *)
-                echo "Invalid option: $1"
-                ensure_apple_sdks_valid_usage
-                exit 1
-                ;;
-        esac
-    done
 
     if [ ! -e "${files_root}"/MacOSX${osx_sdk}.sdk.tar.xz ] || 
        [ ! -e "${files_root}"/iPhoneOS${ios_sdk}.sdk.tar.xz ] || 
@@ -248,13 +147,13 @@ ensure_valid_apple_sdks() {
 
         echo "Building OSX and iOS SDK packages. This will take a while"
 
-        build_docker  --container-type "xcode" --image-version "$img_version"
+        build_docker "xcode"
         docker run --rm \
             -v ${files_root}:/root/files \
             -e XCODE_SDKV=${xcode_sdk} \
             -e OSX_SDKV=${osx_sdk} \
             -e IOS_SDKV=${ios_sdk} \
-            godot-xcode:${img_version} \
+            godot-xcode:${image_version} \
             2>&1 | tee logs/xcode_packer.log
 
         echo "SDK packages copied to '${files_root}'"
@@ -262,34 +161,11 @@ ensure_valid_apple_sdks() {
 }
 
 build_containers() {
-    local img_version
-    local container_types=()
-
-    while [[ "$#" -gt 0 ]]; do
-        case "$1" in
-            --image-version)
-                img_version="$2"
-                shift 2
-                ;;
-            --container-types)
-                shift
-                while [[ "$#" -gt 0 && ! "$1" =~ ^- ]]; do
-                    container_types+=("$1")
-                    shift
-                done
-                ;;
-            *)
-                echo "Invalid option: $1"
-                exit 1
-                ;;
-        esac
-    done
-
     mkdir -p logs
 
-    if ! is_container_built --container "fedora" --tag "$img_version"; then
+    if ! is_container_built "fedora"; then
         echo "Building for fedora"
-        docker build -t godot-fedora:${img_version} -f Dockerfile.base . 2>&1 | tee logs/base.log
+        docker build -t godot-fedora:${image_version} -f Dockerfile.base . 2>&1 | tee logs/base.log
     fi
     
     declare -A dependencies
@@ -300,63 +176,44 @@ build_containers() {
     
     for container_type in "${container_types[@]}"; do
         if [[ "$container_type" == "osx" || "$container_type" == "ios" ]]; then
-            ensure_valid_apple_sdks --image-version "$img_version"
+            ensure_valid_apple_sdks
         fi
 
         if [[ -n "${dependencies[$container_type]}" ]]; then
             IFS=',' read -ra deps <<< "${dependencies[$container_type]}"
             for dep in "${deps[@]}"; do
-                if ! is_container_built --container "$dep" --tag "$img_version"; then
+                if ! is_container_built "$dep"; then
                     echo "Building for ${dep}"
-                    build_docker --container-type "$dep" --image-version "$img_version"
+                    build_docker "$dep"
                 fi
             done
             
         fi
 
-        if ! is_container_built --container "$container_type" --tag "$img_version"; then
+        if ! is_container_built "$container_type"; then
             echo "Building for ${container_type}"
-            build_docker --container-type "$container_type" --image-version "$img_version"
+            build_docker "$container_type"
         fi
 
     done
 }
 
 is_container_built() {
-    local container
-    local tag
+    local container="$1"
 
-    while [[ "$#" -gt 0 ]]; do
-        case "$1" in
-            --container)
-                container="$2"
-                shift 2
-                ;;
-            --tag)
-                tag="$2"
-                shift 2
-                ;;
-            *)
-                echo "Invalid option: $1"
-                exit 1
-                ;;
-        esac
-    done
-
-    if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^godot-${container}:${tag}$"; then
+    if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^godot-${container}:${image_version}$"; then
         return 0
     else
         return 1
     fi
 }
 
-
 main() {
-    local registry="${REGISTRY}"
-    local username="${USERNAME}"
-    local godot_branch="${GIT_BRANCH}"
-    local base_distro="${BASE_DISTRO}"
-    local arg_container_types=()
+    registry="${REGISTRY}"
+    username="${USERNAME}"
+    godot_branch="${GIT_BRANCH}"
+    base_distro="${BASE_DISTRO}"
+    arg_container_types=()
 
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -393,24 +250,24 @@ main() {
     done
 
     # If no container types were provided as arguments, prompt the user to select
-    local container_types=()
+    container_types=()
     select_container_type --container-types-ref container_types "${arg_container_types[@]}"
 
-    local img_version="$godot_branch-$base_distro"
+    image_version="$godot_branch-$base_distro"
 
     if [ ! -z "$PS1" ]; then
-        confirm_settings --image-version  "${img_version}"
+        confirm_settings --image-version  "${image_version}"
     fi
 
     echo "Building Docker container with the following parameters:"
     echo "Godot branch: ${godot_branch}"
     echo "Base distribution: ${base_distro}"
-    echo "Image version: ${img_version}"
+    echo "Image version: ${image_version}"
     echo "Registry: ${registry}"
     echo "Username: ${username}"
     echo "Docker build command executed for: ${container_types[*]}"
 
-    build_containers --image-version "${img_version}" --container-types ${container_types[*]}
+    build_containers
 
     local upload_sh_path
     local file="upload.sh"
