@@ -19,6 +19,10 @@ usage() {
 }
 
 pull_images() {
+    if [ $skip_download_containers -eq 1 ]; then
+        return
+    fi
+    
     echo "Fetching images"
 
     login_to_github_container_registry  --registry "${registry}"     \
@@ -138,7 +142,7 @@ prepare_godot_source() {
 
     if [[ $skip_git_checkout -eq 0 ]]; then
         echo "Cloning Godot repository..."
-        git clone https://github.com/godotengine/godot.git "${basedir}/git" || true
+        git clone "$godot_repository" "${basedir}/git" || true
         pushd "${basedir}/git"
         git checkout -b "${git_branch}" "origin/${git_branch}" || git checkout "${git_branch}"
         git reset --hard
@@ -236,6 +240,8 @@ main() {
     basedir=$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd)
     registry="${REGISTRY}"
     username="${USERNAME}"
+    pat_token="${PAT_TOKEN}"
+    godot_repository="$GODOT_REPOSITORY"
     godot_version="${GODOT_VERSION}"
     godot_version_status="$GODOT_VERSION_STATUS"
     container_version="${CONTAINER_VERSION}"
@@ -243,8 +249,7 @@ main() {
     git_branch="${GIT_BRANCH}"
     build_type="${BUILD_TYPE}"
     build_name="${BUILD_NAME}"
-    force_download="${FORCE_DOWNLOAD}"
-    skip_download="${SKIP_DOWNLOAD}"
+    skip_download_containers="${SKIP_DOWNLOAD_CONTAINERS}"
     skip_git_checkout="${SKIP_GIT_CHECKOUT}"
     num_cores="${NUM_CORES}"
 
@@ -266,6 +271,14 @@ main() {
                 ;;
             --username)
                 username="$2"
+                shift 2
+                ;;
+            --pat-token)
+                pat_token="$2"
+                shift 2
+                ;;
+            --godot-repository)
+                godot_repository="$2"
                 shift 2
                 ;;
             --godot-version)
@@ -296,12 +309,8 @@ main() {
                 build_name="$2"
                 shift 2
                 ;;
-            --force-download)
-                force_download=1
-                shift
-                ;;
-            --skip-download)
-                skip_download=1
+            --skip-download-containers)
+                skip_download_containers=1
                 shift
                 ;;
             --skip-git-checkout)

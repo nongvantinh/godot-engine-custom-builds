@@ -2,6 +2,11 @@
 
 set -e
 
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root using sudo."
+    exit 1
+fi
+
 usage() {
     echo "Available commands:"
     echo "  docker                     Build Docker containers."
