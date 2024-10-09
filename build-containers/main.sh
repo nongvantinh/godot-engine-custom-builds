@@ -6,12 +6,11 @@ usage() {
     echo "Usage: $0 docker [OPTIONS...]"
     echo
     echo "Available options for Docker:"
-    echo "  -r, --registry <registry>       Specify the Docker registry."
-    echo "  -u, --username <username>       Specify the username for the registry."
-    echo "  -p, --password <password>       Specify the password for the registry."
-    echo "  -g, --godot <branch>            Specify the Godot branch (default: $GIT_BRANCH)."
-    echo "  -d, --distro <distro>           Specify the base distribution for Docker images (default: $BASE_DISTRO)."
-    echo "  -c, --container-type <type>     Specify the type of Docker image to build (default: $CONTAINER_TYPE)."
+    echo "  --registry <registry>           Specify the Docker registry."
+    echo "  --username <username>           Specify the username for the registry."
+    echo "  --godot-branch <branch>         Specify the Godot branch (default: $GIT_BRANCH)."
+    echo "  --base-distro <distro>          Specify the base distribution for Docker images (default: $BASE_DISTRO)."
+    echo "  --container-type <type>         Specify the type of Docker image to build."
     echo "  -h, --help                      Show this help message."
     echo
 }
@@ -233,7 +232,7 @@ main() {
                 base_distro="$2"
                 shift 2
                 ;;
-            --container-types)
+            --container-type)
                 arg_container_types+=("$2")
                 shift 2
                 ;;

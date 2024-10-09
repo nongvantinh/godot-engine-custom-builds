@@ -114,7 +114,9 @@ fatal: fetch-pack: invalid index-pack output
 To avoid package conflicts, we isolate each build using Docker. First, we need to build the containers:
 
 ```bash
-sudo ./main.sh docker --container-types all
+sudo ./main.sh docker --container-type all
+# The above command is equivalent to this command:
+sudo ./main.sh docker --container-type windows --container-type linux --container-type android --container-type ios --container-type osx --container-type web 
 ```
 
 This command will build all Docker container types for all supported platforms. It will then automatically publish the compiled containers to the GitHub Container Registry using the information defined in `config.sh`.
