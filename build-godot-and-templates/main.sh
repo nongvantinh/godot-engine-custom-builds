@@ -31,12 +31,12 @@ pull_images() {
 
     echo "Fetching images from GitHub Container Registry..."
 
-    local windows_container="${registry}/${username}/godot-windows:${container_version}-${image_version}"
-    local linux_container="${registry}/${username}/godot-linux:${container_version}-${image_version}"
-    local web_container="${registry}/${username}/godot-web:${container_version}-${image_version}"
-    local macos_container="${registry}/${username}/godot-osx:${container_version}-${image_version}"
-    local android_container="${registry}/${username}/godot-android:${container_version}-${image_version}"
-    local ios_container="${registry}/${username}/godot-ios:${container_version}-${image_version}"
+    windows_container="${registry}/${username}/godot-windows:${container_version}-${image_version}"
+    linux_container="${registry}/${username}/godot-linux:${container_version}-${image_version}"
+    web_container="${registry}/${username}/godot-web:${container_version}-${image_version}"
+    macos_container="${registry}/${username}/godot-osx:${container_version}-${image_version}"
+    android_container="${registry}/${username}/godot-android:${container_version}-${image_version}"
+    ios_container="${registry}/${username}/godot-ios:${container_version}-${image_version}"
     
     local images=(
         "$windows_container"
@@ -181,16 +181,9 @@ download_dependencies() {
 
 build() {
     echo "Building Godot engine and its templates"
-    pull_images
     
+    pull_images
     download_dependencies
-
-    local windows_container="${registry}/${username}/godot-windows:${container_version}-${image_version}"
-    local linux_container="${registry}/${username}/godot-linux:${container_version}-${image_version}"
-    local web_container="${registry}/${username}/godot-web:${container_version}-${image_version}"
-    local macos_container="${registry}/${username}/godot-osx:${container_version}-${image_version}"
-    local android_container="${registry}/${username}/godot-android:${container_version}-${image_version}"
-    local ios_container="${registry}/${username}/godot-ios:${container_version}-${image_version}"
 
     mkdir -p ${basedir}/out
     mkdir -p ${basedir}/out/logs
