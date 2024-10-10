@@ -82,6 +82,8 @@ Here are the specifications of the machine I used to run this project. If your m
 - **Threads**: 16
 - **OS**: Ubuntu 24.04
 
+Eventually, with the specification above, the web build will still fail at the linking stage due to insufficient RAM.
+
 ## Getting Started
 
 ### 1. Install Ubuntu 24.04 OS
