@@ -249,8 +249,8 @@ main() {
     disable_cleanup=0
     disable_generate_tarball=0
 
-    build=0;
-    release=0;
+    build=0
+    release=0
 
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
@@ -329,6 +329,22 @@ main() {
             --release)
                 release=1
                 shift
+                ;;
+            --clean-release)
+                rm -rf ${basedir}/releases ${basedir}/tmp ${basedir}/web
+                exit 0
+                ;;
+            --cleanup)
+                rm -rf ${basedir}/godot*.tar.gz         \
+                        ${basedir}/mono-glue            \
+                        ${basedir}/out                  \
+                        ${basedir}/releases             \
+                        ${basedir}/tmp                  \
+                        ${basedir}/web                  \
+                        ${basedir}/git                  \
+                        ${basedir}/sha512sums           \
+                        ${basedir}/deps
+                exit 0
                 ;;
             -h|--help)
                 usage

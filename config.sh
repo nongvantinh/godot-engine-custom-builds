@@ -10,20 +10,20 @@ export PAT_TOKEN="40 random characters after github personal token has been gene
 export REPO_NAME="godot-engine-custom-builds"
 
 # The Git repository where the Godot source is located.
-export GODOT_REPOSITORY="https://github.com/godotengine/godot.git"
+export GODOT_REPOSITORY="https://github.com/nongvantinh/godot.git"
 # Name of the branch to check out after cloning the Godot source
-export GIT_BRANCH="4.3"
+export GIT_BRANCH="4.4.dev"
 # This must match the version numbers contained in the Godot project's version.py
-export GODOT_VERSION="4.3.1"
+export GODOT_VERSION="4.4"
 # Possible values are: rc, stable
-export GODOT_VERSION_STATUS="rc"
+export GODOT_VERSION_STATUS="dev"
 # Skip check out godot source
 export SKIP_GIT_CHECKOUT=0
 
 export SKIP_DOWNLOAD_CONTAINERS=0
 # Each version of Godot may require more or fewer dependencies.
 # Therefore, we usually build containers for a specific version.
-export CONTAINER_VERSION="$GIT_BRANCH"
+export CONTAINER_VERSION="4.3"
 export BASE_DISTRO="f40"
 export CONTAINER_TYPE="all"
 export XCODE_SDK=15.4
