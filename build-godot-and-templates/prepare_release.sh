@@ -556,14 +556,14 @@ release() {
     echo "Creating release $godot_version..."
     echo "$PAT_TOKEN" | gh auth login --with-token
 
-    gh release create "$godot_version" \
+    gh release create "${binaries_version}" \
         "${files[@]}" \
-        --title "$godot_version" \
-        --notes "Release notes for version $godot_version" \
+        --title "$binaries_version" \
+        --notes "Release notes for version $binaries_version" \
         --generate-notes \
         --latest
 
-    echo "Release $godot_version created successfully!"
+    echo "Release $binaries_version created successfully!"
 }
 
 main() {

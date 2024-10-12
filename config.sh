@@ -15,8 +15,8 @@ export GODOT_REPOSITORY="https://github.com/nongvantinh/godot.git"
 export GIT_BRANCH="4.4.dev"
 # This must match the version numbers contained in the Godot project's version.py
 export GODOT_VERSION="4.4"
-# Possible values are: rc, stable
-export GODOT_VERSION_STATUS="dev"
+# Possible values are: rc, stable, dev, custom_build
+export GODOT_VERSION_STATUS="custom_build"
 # Skip check out godot source
 export SKIP_GIT_CHECKOUT=0
 
