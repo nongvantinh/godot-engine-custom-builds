@@ -10,21 +10,28 @@ except ImportError as e:
     print(f"Error importing version: {e}")
     sys.exit(1)
 
-def validate_version(godot_version):
+def get_version():
     if hasattr(version, "patch") and version.patch != 0:
         git_version = f"{version.major}.{version.minor}.{version.patch}"
     else:
         git_version = f"{version.major}.{version.minor}"
     
-    return git_version == godot_version
+    return git_version
+
+def get_version_status():
+    return f"{version.status}"
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python validate_version.py <godot_version>")
+    if len(sys.argv) < 2:
+        print("Usage: python validate_version.py --get-version | --get-version-status")
         sys.exit(1)
 
-    godot_version = sys.argv[1]
-    if validate_version(godot_version):
-        print("Version is valid.")
+    command = sys.argv[1]
+
+    if command == '--get-version':
+        print(get_version())
+    elif command == '--get-version-status':
+        print(get_version_status())
     else:
-        print(f"Version does not match: expected {godot_version}.")
+        print("Invalid command. Use --get-version or --get-version-status.")
+        sys.exit(1)

@@ -135,35 +135,24 @@ prepare_android_sign_keystore() {
 prepare_godot_source() {
     echo "Preparing Godot source..."
     
-    if [ -f "${basedir}/godot-${godot_version}.tar.gz" ]; then
-      echo "Tarball already exists. Skipping clone."
-      return
-    fi
+    echo "Cloning Godot repository..."
+    git clone "$godot_repository" "${basedir}/git" || true
+    pushd "${basedir}/git"
+    git checkout -b "${git_branch}" "origin/${git_branch}" || git checkout "${git_branch}"
+    git reset --hard
+    git clean -fdx
+    git pull origin "${git_branch}" || true
+    popd
 
-    if [[ $skip_git_checkout -eq 0 ]]; then
-        echo "Cloning Godot repository..."
-        git clone "$godot_repository" "${basedir}/git" || true
-        pushd "${basedir}/git"
-        git checkout -b "${git_branch}" "origin/${git_branch}" || git checkout "${git_branch}"
-        git reset --hard
-        git clean -fdx
-        git pull origin "${git_branch}" || true
-        popd
-    
-        # Validate version
-        correct_version=$(python3 validate_version.py "${godot_version}")
+    # Extract version information
+    godot_version=$(python3 extract_version.py --get-version)
+    godot_version_status=$(python3 extract_version.py --get-version-status)
 
-        if [[ "$correct_version" != "Version is valid." ]]; then
-            echo "Version in version.py $correct_version doesn't match the passed ${godot_version}."
-            exit 1
-        fi
+    pushd "${basedir}/git"
+    echo "Creating Godot tarball..."
+    sh misc/scripts/make_tarball.sh -v "${godot_version}" -g "${git_branch}"
 
-        pushd "${basedir}/git"
-        echo "Creating Godot tarball..."
-        sh misc/scripts/make_tarball.sh -v "${godot_version}" -g "${git_branch}"
-    
-        popd
-    fi
+    popd
 }
 
 download_dependencies() {
@@ -201,7 +190,7 @@ build() {
     fi
 
     mkdir -p ${basedir}/mono-glue
-    docker_run="docker run --rm --env BUILD_NAME="$build_name" --env GODOT_VERSION_STATUS="$GODOT_VERSION_STATUS" --env NUM_CORES="$num_cores" --env CLASSICAL=${build_classical} --env MONO=${build_mono} -v ${basedir}/godot-${godot_version}.tar.gz:/root/godot.tar.gz -v ${basedir}/mono-glue:/root/mono-glue -w /root/"
+    docker_run="docker run --rm --env BUILD_NAME="$build_name" --env GODOT_VERSION_STATUS="$godot_version_status" --env NUM_CORES="$num_cores" --env CLASSICAL=${build_classical} --env MONO=${build_mono} -v ${basedir}/godot-${godot_version}.tar.gz:/root/godot.tar.gz -v ${basedir}/mono-glue:/root/mono-glue -w /root/"
 
     mkdir -p ${basedir}/mono-glue
     ${docker_run} -v ${basedir}/build-mono-glue:/root/build ${linux_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/mono-glue
@@ -235,15 +224,12 @@ main() {
     username="${USERNAME}"
     pat_token="${PAT_TOKEN}"
     godot_repository="$GODOT_REPOSITORY"
-    godot_version="${GODOT_VERSION}"
-    godot_version_status="$GODOT_VERSION_STATUS"
     container_version="${CONTAINER_VERSION}"
     image_version="${BASE_DISTRO}"
     git_branch="${GIT_BRANCH}"
     build_type="${BUILD_TYPE}"
     build_name="${BUILD_NAME}"
     skip_download_containers="${SKIP_DOWNLOAD_CONTAINERS}"
-    skip_git_checkout="${SKIP_GIT_CHECKOUT}"
     num_cores="${NUM_CORES}"
 
     disable_cleanup=0
@@ -274,14 +260,6 @@ main() {
                 godot_repository="$2"
                 shift 2
                 ;;
-            --godot-version)
-                godot_version="$2"
-                shift 2
-                ;;
-            --godot-version-status)
-                godot_version_status="$2"
-                shift 2
-                ;;
             --container-version)
                 container_version="$2"
                 shift 2
@@ -304,10 +282,6 @@ main() {
                 ;;
             --skip-download-containers)
                 skip_download_containers=1
-                shift
-                ;;
-            --skip-git-checkout)
-                skip_git_checkout=1
                 shift
                 ;;
             --num-cores)
@@ -358,20 +332,13 @@ main() {
         esac
     done
 
-    if [ -z "$godot_version" ]; then
-        echo "Error: Godot version (-v) is mandatory."
-        usage
-        exit 1
-    fi
-
     echo "Building Godot engine with the following parameters:"
-    echo "Version: $godot_version"
     echo "Git branch: ${git_branch}"
     echo "Build type: $build_type"
     echo "Registry: ${registry:-Not specified}"
     echo "Username: ${username:-Not specified}"
 
-    echo "Godot build command executed for ${build_type} using godot version ${godot_version} and ${build_name}."
+    echo "Godot build command executed for ${build_type}."
 
     echo "number of cores will be used: ${num_cores}"
 

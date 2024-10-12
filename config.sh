@@ -13,12 +13,6 @@ export REPO_NAME="godot-engine-custom-builds"
 export GODOT_REPOSITORY="https://github.com/nongvantinh/godot.git"
 # Name of the branch to check out after cloning the Godot source
 export GIT_BRANCH="4.4.dev"
-# This must match the version numbers contained in the Godot project's version.py
-export GODOT_VERSION="4.4"
-# Possible values are: rc, stable, dev, custom_build
-export GODOT_VERSION_STATUS="custom_build"
-# Skip check out godot source
-export SKIP_GIT_CHECKOUT=0
 
 export SKIP_DOWNLOAD_CONTAINERS=0
 # Each version of Godot may require more or fewer dependencies.
