@@ -31,7 +31,7 @@ publish_nuget_packages() {
         echo "Source '$NUGET_SOURCE' already exists. Skip adding this source"
     else
         echo "Adding $NUGET_SOURCE source..."
-        dotnet nuget add source --name "$NUGET_SOURCE" "$NUGET_SOURCE_URL"
+        dotnet nuget add source --name "$NUGET_SOURCE" --username "${USERNAME} --password ${PAT_TOKEN} --store-password-in-clear-text "$NUGET_SOURCE_URL"
     fi
 
     for pkg in "$@"; do

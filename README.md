@@ -148,7 +148,7 @@ dotnet nuget add source --name "$NUGET_SOURCE" "$NUGET_SOURCE_URL"
 For example:
 
 ```bash
-dotnet nuget add source --name "github" "https://nuget.pkg.github.com/$USERNAME/index.json"
+dotnet nuget add source --name github --username YOUR_GITHUB_USERNAME --password YOUR_ACCESS_TOKEN --store-password-in-clear-text https://nuget.pkg.github.com/YOUR_GITHUB_USERNAME/index.json
 ```
 
 Replace **$USERNAME** with your actual GitHub username where you uploaded the packages.
