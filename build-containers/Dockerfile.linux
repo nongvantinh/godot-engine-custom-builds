@@ -1,6 +1,8 @@
 ARG IMAGE_VERSION=latest
-ARG REPO_URL="https://github.com/nongvantinh/godot-engine-custom-builds"
 FROM godot-fedora:${IMAGE_VERSION}
+
+ARG IMAGE_VERSION
+ARG REPO_URL="https://github.com/nongvantinh/godot-engine-custom-builds"
 
 LABEL "org.opencontainers.image.source"="$REPO_URL"
 
