@@ -110,6 +110,13 @@ prepare_for_linux_classical() {
         zip -q -9 "${relative_directory}/${binname}.zip" "${binname}"
         rm "${binname}"
     done
+    
+    # ICU data
+    if [ -f ${basedir}/git/thirdparty/icu4c/icudt_godot.dat ]; then
+        cp ${basedir}/git/thirdparty/icu4c/icudt_godot.dat ${templatesdir}/icudt_godot.dat
+    else
+        echo "icudt_godot.dat" not found.
+    fi
 
     # Process templates
     echo "Copying templates..."
@@ -319,6 +326,13 @@ prepare_for_linux_mono() {
 
         echo "${binbasename}_${arch}: Done"
     done
+
+    # ICU data
+    if [ -f ${basedir}/git/thirdparty/icu4c/icudt_godot.dat ]; then
+        cp ${basedir}/git/thirdparty/icu4c/icudt_godot.dat ${templatesdir}/icudt_godot.dat
+    else
+        echo "icudt_godot.dat" not found.
+    fi
 
     # Prepare templates
     echo "Copying templates..."

@@ -110,6 +110,19 @@ download_mesa() {
     fi
 }
 
+download_swappy() {
+    echo "Downloading swappy..."
+
+    if [ ! -d "${basedir}/deps/swappy" ]; then
+        echo "Missing Swappy libraries, downloading them."
+        mkdir -p "${basedir}/deps/swappy"
+        pushd "${basedir}/deps/swappy"
+        curl -L -O https://github.com/darksylinc/godot-swappy/releases/download/v2023.3.0.0/godot-swappy.7z
+        7z x godot-swappy.7z && rm godot-swappy.7z
+        popd
+    fi
+}
+
 prepare_android_sign_keystore() {
     echo "Preparing android signing keystore..."
 
@@ -138,6 +151,7 @@ prepare_godot_source() {
     echo "Cloning Godot repository..."
     git clone "$godot_repository" "${basedir}/git" || true
     pushd "${basedir}/git"
+    git fetch
     git checkout -b "${git_branch}" "origin/${git_branch}" || git checkout "${git_branch}"
     git reset --hard
     git clean -fdx
@@ -163,6 +177,7 @@ download_dependencies() {
     download_moltenvk
     download_angle
     download_mesa
+    download_swappy
     prepare_android_sign_keystore
     
     prepare_godot_source        
@@ -208,7 +223,7 @@ build() {
     ${docker_run} -v ${basedir}/build-macos:/root/build -v ${basedir}/out/macos:/root/out -v ${basedir}/deps/moltenvk:/root/moltenvk -v ${basedir}/deps/angle:/root/angle ${macos_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/macos
 
     mkdir -p ${basedir}/out/android
-    ${docker_run} -v ${basedir}/build-android:/root/build -v ${basedir}/out/android:/root/out -v ${basedir}/deps/keystore:/root/keystore ${android_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/android
+    ${docker_run} -v ${basedir}/build-android:/root/build -v ${basedir}/out/android:/root/out -v ${basedir}/deps/swappy:/root/swappy -v ${basedir}/deps/keystore:/root/keystore localhost/godot-android:${img_version} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/android
 
     mkdir -p ${basedir}/out/ios
     ${docker_run} -v ${basedir}/build-ios:/root/build -v ${basedir}/out/ios:/root/out ${ios_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/ios

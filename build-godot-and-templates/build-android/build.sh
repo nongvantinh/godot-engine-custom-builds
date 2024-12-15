@@ -13,6 +13,7 @@ rm -rf godot
 mkdir godot
 cd godot
 tar xf /root/godot.tar.gz --strip-components=1
+cp -rf /root/swappy/* thirdparty/swappy-frame-pacing/
 
 # Environment variables and keystore needed for signing store editor build,
 # as well as signing and publishing to MavenCentral.
@@ -73,7 +74,7 @@ if [ "${CLASSICAL}" == "1" ]; then
   $SCONS platform=android arch=x86_64 $OPTIONS target=template_release
 
   pushd platform/android/java
-  ./gradlew generateGodotTemplates
+  ./gradlew generateGodotMonoTemplates
 
   if [ "$store_release" == "yes" ]; then
     # Copy source folder with compiled libs so we can optionally use it
@@ -116,8 +117,8 @@ if [ "${MONO}" == "1" ]; then
 
   mkdir -p /root/out/templates-mono
   cp bin/android_source.zip /root/out/templates-mono/
-  cp bin/android_debug.apk /root/out/templates-mono/
-  cp bin/android_release.apk /root/out/templates-mono/
+  cp bin/android_monoDebug.apk /root/out/templates-mono/android_debug.apk
+  cp bin/android_monoRelease.apk /root/out/templates-mono/android_release.apk
   cp bin/godot-lib.template_release.aar /root/out/templates-mono/
 fi
 
