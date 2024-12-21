@@ -50,7 +50,7 @@ publish_nuget_packages() {
                     -H "Accept: application/vnd.github+json" \
                     -H "X-GitHub-Api-Version: 2022-11-28" \
                     /$name/$USERNAME/packages/nuget/$package_name/versions \
-                    | grep -oP '"id":\d+' | awk -F':' '{print $2}')
+                    | jq --arg version "$version" '.[] | select(.name==$version) | .id')
 
         echo "version_id: $version_id"
 
@@ -641,7 +641,7 @@ main() {
     echo "templatesdir_mono: $templatesdir_mono"
     echo "godot_basename: $godot_basename"
 
-    cleanup_and_setup
+    cleanup_and_setup out/linux/x86_64/tools-mono/GodotSharp/Tools/nupkgs/*.nupkg
 
     prepare
     release
