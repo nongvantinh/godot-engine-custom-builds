@@ -155,12 +155,8 @@ prepare_godot_source() {
     git checkout -b "${git_branch}" "origin/${git_branch}" || git checkout "${git_branch}"
     git reset --hard
     git clean -fdx
-    git pull origin "${git_branch}" || true
+    git pull --rebase origin "${git_branch}" || true
     popd
-
-    # Extract version information
-    godot_version=$(python3 extract_version.py --get-version)
-    godot_version_status=$(python3 extract_version.py --get-version-status)
 
     pushd "${basedir}/git"
     echo "Creating Godot tarball..."
@@ -210,27 +206,32 @@ build() {
     mkdir -p ${basedir}/mono-glue
     ${docker_run} -v ${basedir}/build-mono-glue:/root/build ${linux_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/mono-glue
 
-    mkdir -p ${basedir}/out/windows
-    ${docker_run} -v ${basedir}/build-windows:/root/build -v ${basedir}/out/windows:/root/out -v ${basedir}/deps/angle:/root/angle -v ${basedir}/deps/mesa:/root/mesa --env STEAM=${build_steam} ${windows_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/windows
-
     mkdir -p ${basedir}/out/linux
     ${docker_run} -v ${basedir}/build-linux:/root/build -v ${basedir}/out/linux:/root/out ${linux_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/linux
 
-    mkdir -p ${basedir}/out/web
-    ${docker_run} -v ${basedir}/build-web:/root/build -v ${basedir}/out/web:/root/out ${web_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/web
+    mkdir -p ${basedir}/out/android
+    ${docker_run} -v ${basedir}/build-android:/root/build -v ${basedir}/out/android:/root/out -v ${basedir}/deps/swappy:/root/swappy -v ${basedir}/deps/keystore:/root/keystore ${android_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/android
+
+    mkdir -p ${basedir}/out/windows
+    ${docker_run} -v ${basedir}/build-windows:/root/build -v ${basedir}/out/windows:/root/out -v ${basedir}/deps/angle:/root/angle -v ${basedir}/deps/mesa:/root/mesa --env STEAM=${build_steam} ${windows_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/windows
 
     mkdir -p ${basedir}/out/macos
     ${docker_run} -v ${basedir}/build-macos:/root/build -v ${basedir}/out/macos:/root/out -v ${basedir}/deps/moltenvk:/root/moltenvk -v ${basedir}/deps/angle:/root/angle ${macos_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/macos
 
-    mkdir -p ${basedir}/out/android
-    ${docker_run} -v ${basedir}/build-android:/root/build -v ${basedir}/out/android:/root/out -v ${basedir}/deps/swappy:/root/swappy -v ${basedir}/deps/keystore:/root/keystore localhost/godot-android:${img_version} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/android
-
     mkdir -p ${basedir}/out/ios
     ${docker_run} -v ${basedir}/build-ios:/root/build -v ${basedir}/out/ios:/root/out ${ios_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/ios
 
+    mkdir -p ${basedir}/out/web
+    ${docker_run} -v ${basedir}/build-web:/root/build -v ${basedir}/out/web:/root/out ${web_container} bash build/build.sh 2>&1 | tee ${basedir}/out/logs/web
+
+    uid=$(id -un)
+    gid=$(id -gn)
     if [ ! -z "$SUDO_UID" ]; then
-      chown -R "${SUDO_UID}:${SUDO_GID}" ${basedir}/git ${basedir}/out ${basedir}/mono-glue ${basedir}/godot*.tar.gz
+      uid="${SUDO_UID}"
+        gid="${SUDO_GID}"
     fi
+    
+    chown -R "${uid}:${gid}" ${basedir}/git ${basedir}/out ${basedir}/mono-glue ${basedir}/godot*.tar.gz
 }
 
 main() {
@@ -320,7 +321,7 @@ main() {
                 shift
                 ;;
             --clean-release)
-                rm -rf ${basedir}/releases ${basedir}/tmp ${basedir}/web
+                rm -rf ${basedir}/releases ${basedir}/tmp ${basedir}/web ${basedir}/godot*.tar.gz
                 exit 0
                 ;;
             --cleanup)
@@ -356,6 +357,10 @@ main() {
     echo "Godot build command executed for ${build_type}."
 
     echo "number of cores will be used: ${num_cores}"
+
+    # Extract version information
+    godot_version=$(python3 extract_version.py --get-version)
+    godot_version_status=$(python3 extract_version.py --get-version-status)
 
     if [ $build -eq 1 ]; then
         build

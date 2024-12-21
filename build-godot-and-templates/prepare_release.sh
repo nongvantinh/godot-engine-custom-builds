@@ -556,7 +556,6 @@ publish_packages() {
 prepare() {
     prepare_for_classical
     prepare_for_mono
-    publish_packages
 }
 
 release() {
@@ -569,6 +568,8 @@ release() {
 
     echo "Creating release $godot_version..."
     echo "$PAT_TOKEN" | gh auth login --with-token
+
+    publish_packages
 
     gh release create "${binaries_version}" \
         "${files[@]}" \

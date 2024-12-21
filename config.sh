@@ -12,12 +12,12 @@ export REPO_NAME="godot-engine-custom-builds"
 # The Git repository where the Godot source is located.
 export GODOT_REPOSITORY="https://github.com/nongvantinh/godot.git"
 # Name of the branch to check out after cloning the Godot source
-export GIT_BRANCH="4.4.dev"
+export GIT_BRANCH="4.4.dev6"
 
 export SKIP_DOWNLOAD_CONTAINERS=0
 # Each version of Godot may require more or fewer dependencies.
 # Therefore, we usually build containers for a specific version.
-export CONTAINER_VERSION="4.3"
+export CONTAINER_VERSION="4.4.dev6"
 export BASE_DISTRO="f40"
 export CONTAINER_TYPE="all"
 export XCODE_SDK=15.4

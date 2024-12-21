@@ -60,6 +60,7 @@ if [ "${CLASSICAL}" == "1" ]; then
   # outside the container for the MavenCentral upload.
   rm -rf /root/godot/*
   tar xf /root/godot.tar.gz --strip-components=1
+  cp -rf /root/swappy/* thirdparty/swappy-frame-pacing/
 
   $SCONS platform=android arch=arm32 $OPTIONS target=template_debug
   $SCONS platform=android arch=arm32 $OPTIONS target=template_release
@@ -74,7 +75,7 @@ if [ "${CLASSICAL}" == "1" ]; then
   $SCONS platform=android arch=x86_64 $OPTIONS target=template_release
 
   pushd platform/android/java
-  ./gradlew generateGodotMonoTemplates
+  ./gradlew generateGodotTemplates
 
   if [ "$store_release" == "yes" ]; then
     # Copy source folder with compiled libs so we can optionally use it
@@ -112,7 +113,7 @@ if [ "${MONO}" == "1" ]; then
   $SCONS platform=android arch=x86_64 $OPTIONS $OPTIONS_MONO target=template_release
 
   pushd platform/android/java
-  ./gradlew generateGodotTemplates
+  ./gradlew generateGodotMonoTemplates
   popd
 
   mkdir -p /root/out/templates-mono
