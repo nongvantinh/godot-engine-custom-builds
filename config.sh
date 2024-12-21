@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Is this an organization account or just a normal user account
+export IS_ORG_ACCOUNT=0
+
 # Registry where the containers will be staged and pushed.
 export REGISTRY="ghcr.io"
 # The username(namespace) where the packages will be uploaded.

@@ -34,7 +34,36 @@ publish_nuget_packages() {
         dotnet nuget add source --name "$NUGET_SOURCE" --username "$USERNAME" --password "$PAT_TOKEN" --store-password-in-clear-text "$NUGET_SOURCE_URL"
     fi
 
+    local name="orgs"
+    if [ $IS_ORG_ACCOUNT -eq 0 ]; then
+            name="users"
+    fi
+
     for pkg in "$@"; do
+        package_name=$(echo "$pkg" | grep -oP '/\K[\w\.]+(?=\.\d+.*(\d+(\.\d+)+(-\w+)?)\.nupkg$)')
+        version=$(echo "$pkg" | grep -oP '(\d+(\.\d+)+(-\w+)?)')
+
+        echo "Package Name: $package_name"
+        echo "Version: $version"
+
+        version_id=$(gh api \
+                    -H "Accept: application/vnd.github+json" \
+                    -H "X-GitHub-Api-Version: 2022-11-28" \
+                    /$name/$USERNAME/packages/nuget/$package_name/versions \
+                    | grep -oP '"id":\d+' | awk -F':' '{print $2}')
+
+        echo "version_id: $version_id"
+
+        if [ -n "$version_id" ]; then
+            echo "Deleting version ID: $version_id"
+            gh api \
+            --method DELETE \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            /$name/$USERNAME/packages/nuget/$package_name/versions/$version_id
+        else
+            echo "Version ID for $package_name not found"
+        fi
         dotnet nuget push $pkg --source "${NUGET_SOURCE}" --api-key "${NUGET_API_KEY}" --skip-duplicate
     done
 }
@@ -57,6 +86,7 @@ publish_maven_library() {
 
 cleanup_and_setup() {
     echo "Cleanup and setup"
+
     if [ $disable_cleanup -eq 0 ]; then
         echo "Cleaning old folders"
 
