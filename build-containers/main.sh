@@ -117,9 +117,9 @@ build_docker() {
     docker build                                                                \
         --no-cache                                                              \
         --debug                                                                 \
-        --build-arg IMAGE_VERSION=${image_version}                              \
+        --build-arg IMAGE_VERSION=${image_version}                                \
         --build-arg REPO_URL="https://github.com/$USERNAME/$REPO_NAME"          \
-        -t godot-"$container_type:${image_version}"                             \
+        -t godot-"$container_type:${image_version}"                               \
         -f Dockerfile."$container_type" .                                       \
         2>&1 | tee logs/"$container_type".log
 }
@@ -164,7 +164,7 @@ build_containers() {
 
     if ! is_container_built "fedora"; then
         echo "Building for fedora"
-        docker build -t godot-fedora:${image_version} -f Dockerfile.base . 2>&1 | tee logs/base.log
+        docker build --build-arg BASE_VERSION=${BASE_VERSION} -t godot-fedora:${image_version} -f Dockerfile.base . 2>&1 | tee logs/base.log
     fi
     
     declare -A dependencies
@@ -252,7 +252,7 @@ main() {
     container_types=()
     select_container_type --container-types-ref container_types "${arg_container_types[@]}"
 
-    image_version="$godot_branch-$base_distro"
+    image_version="$CONTAINER_VERSION-$base_distro"
 
     if [ ! -z "$PS1" ]; then
         confirm_settings --image-version  "${image_version}"

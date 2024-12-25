@@ -321,7 +321,13 @@ main() {
                 shift
                 ;;
             --clean-release)
-                rm -rf ${basedir}/releases ${basedir}/tmp ${basedir}/web ${basedir}/godot*.tar.gz
+                rm -rf ${basedir}/godot*.tar.gz         \
+                        ${basedir}/mono-glue            \
+                        ${basedir}/out                  \
+                        ${basedir}/releases             \
+                        ${basedir}/tmp                  \
+                        ${basedir}/web                  \
+                        ${basedir}/sha512sums           
                 exit 0
                 ;;
             --cleanup)
@@ -360,7 +366,7 @@ main() {
 
     # Extract version information
     godot_version=$(python3 extract_version.py --get-version)
-    godot_version_status=$(python3 extract_version.py --get-version-status)
+    godot_version_status="$(python3 extract_version.py --get-version-status)${VERSION_STATUS_PATCH}"
 
     if [ $build -eq 1 ]; then
         build

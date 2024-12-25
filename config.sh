@@ -20,12 +20,14 @@ export GIT_BRANCH="4.4.dev6"
 export SKIP_DOWNLOAD_CONTAINERS=0
 # Each version of Godot may require more or fewer dependencies.
 # Therefore, we usually build containers for a specific version.
-export CONTAINER_VERSION="4.4.dev6"
-export BASE_DISTRO="f40"
+export CONTAINER_VERSION="4.4"
+export VERSION_STATUS_PATCH="-1"
+export BASE_VERSION=41
+export BASE_DISTRO="f${BASE_VERSION}"
 export CONTAINER_TYPE="all"
-export XCODE_SDK=15.4
-export OSX_SDK=14.5
-export IOS_SDK=17.5
+export XCODE_SDK=16.2
+export OSX_SDK=15.2
+export IOS_SDK=18.2
 
 # all|classical|mono
 export BUILD_TYPE="all"

@@ -40,30 +40,30 @@ publish_nuget_packages() {
     fi
 
     for pkg in "$@"; do
-        package_name=$(echo "$pkg" | grep -oP '/\K[\w\.]+(?=\.\d+.*(\d+(\.\d+)+(-\w+)?)\.nupkg$)')
-        version=$(echo "$pkg" | grep -oP '(\d+(\.\d+)+(-\w+)?)')
+        # package_name=$(echo "$pkg" | grep -oP '/\K[\w\.]+(?=\.\d+.*(\d+(\.\d+)+(-\w+)?)\.nupkg$)')
+        # version=$(echo "$pkg" | grep -oP '(\d+(\.\d+)+(-\w+)?)')
 
-        echo "Package Name: $package_name"
-        echo "Version: $version"
+        # echo "Package Name: $package_name"
+        # echo "Version: $version"
 
-        version_id=$(gh api \
-                    -H "Accept: application/vnd.github+json" \
-                    -H "X-GitHub-Api-Version: 2022-11-28" \
-                    /$name/$USERNAME/packages/nuget/$package_name/versions \
-                    | jq --arg version "$version" '.[] | select(.name==$version) | .id')
+        # version_id=$(gh api \
+        #             -H "Accept: application/vnd.github+json" \
+        #             -H "X-GitHub-Api-Version: 2022-11-28" \
+        #             /$name/$USERNAME/packages/nuget/$package_name/versions \
+        #             | jq --arg version "$version" '.[] | select(.name==$version) | .id')
 
-        echo "version_id: $version_id"
+        # echo "version_id: $version_id"
 
-        if [ -n "$version_id" ]; then
-            echo "Deleting version ID: $version_id"
-            gh api \
-            --method DELETE \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            /$name/$USERNAME/packages/nuget/$package_name/versions/$version_id
-        else
-            echo "Version ID for $package_name not found"
-        fi
+        # if [ -n "$version_id" ]; then
+        #     echo "Deleting version ID: $version_id"
+        #     gh api \
+        #     --method DELETE \
+        #     -H "Accept: application/vnd.github+json" \
+        #     -H "X-GitHub-Api-Version: 2022-11-28" \
+        #     /$name/$USERNAME/packages/nuget/$package_name/versions/$version_id
+        # else
+        #     echo "Version ID for $package_name not found"
+        # fi
         dotnet nuget push $pkg --source "${NUGET_SOURCE}" --api-key "${NUGET_API_KEY}" --skip-duplicate
     done
 }
@@ -641,7 +641,7 @@ main() {
     echo "templatesdir_mono: $templatesdir_mono"
     echo "godot_basename: $godot_basename"
 
-    cleanup_and_setup out/linux/x86_64/tools-mono/GodotSharp/Tools/nupkgs/*.nupkg
+    cleanup_and_setup
 
     prepare
     release
