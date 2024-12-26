@@ -28,11 +28,12 @@ publish_nuget_packages() {
     fi
 
     if dotnet nuget list source | grep -q "$NUGET_SOURCE"; then
-        echo "Source '$NUGET_SOURCE' already exists. Skip adding this source"
-    else
-        echo "Adding $NUGET_SOURCE source..."
-        dotnet nuget add source --name "$NUGET_SOURCE" --username "$USERNAME" --password "$PAT_TOKEN" --store-password-in-clear-text "$NUGET_SOURCE_URL"
+        echo "Source '$NUGET_SOURCE' already exists. Deleteting the old source"
+        dotnet nuget remove source $NUGET_SOURCE
     fi
+
+    echo "Adding $NUGET_SOURCE source..."
+    dotnet nuget add source --name "$NUGET_SOURCE" --username "$USERNAME" --password "$PAT_TOKEN" --store-password-in-clear-text "$NUGET_SOURCE_URL"
 
     local name="orgs"
     if [ $IS_ORG_ACCOUNT -eq 0 ]; then
@@ -40,11 +41,16 @@ publish_nuget_packages() {
     fi
 
     for pkg in "$@"; do
-        # package_name=$(echo "$pkg" | grep -oP '/\K[\w\.]+(?=\.\d+.*(\d+(\.\d+)+(-\w+)?)\.nupkg$)')
-        # version=$(echo "$pkg" | grep -oP '(\d+(\.\d+)+(-\w+)?)')
+        # Remove everything after the last dot using parameter expansion
+        filename="${pkg%.nupkg}"
+        # Remove everything after the last slash using further parameter expansion
+        filename="${filename##*/}"
+        # Extract package name (everything up to the last dot and digits)
+        package_name="${filename%%.[0-9]*}"
+        version=$(echo "$filename" | grep -oE '([0-9]+).*$')
 
-        # echo "Package Name: $package_name"
-        # echo "Version: $version"
+        echo "Package Name: $package_name"
+        echo "Version: $version"
 
         # version_id=$(gh api \
         #             -H "Accept: application/vnd.github+json" \
@@ -599,7 +605,6 @@ release() {
     echo "Creating release $godot_version..."
     echo "$PAT_TOKEN" | gh auth login --with-token
 
-    sleep 7
 
     publish_packages
 
