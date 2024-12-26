@@ -599,6 +599,8 @@ release() {
     echo "Creating release $godot_version..."
     echo "$PAT_TOKEN" | gh auth login --with-token
 
+    sleep 7
+
     publish_packages
 
     gh release create "${binaries_version}" \
