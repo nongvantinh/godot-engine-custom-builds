@@ -364,13 +364,13 @@ main() {
 
     echo "number of cores will be used: ${num_cores}"
 
-    # Extract version information
-    godot_version=$(python3 extract_version.py --get-version)
-    godot_version_status="$(python3 extract_version.py --get-version-status)${VERSION_STATUS_PATCH}"
-
     if [ $build -eq 1 ]; then
         build
     fi
+
+    # Extract version information
+    godot_version=$(python3 extract_version.py --get-version)
+    godot_version_status="$(python3 extract_version.py --get-version-status)${VERSION_STATUS_PATCH}"
 
     if [ $release -eq 1 ]; then
         local release_sh_path

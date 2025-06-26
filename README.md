@@ -88,7 +88,7 @@ Eventually, with the specification above, the web build will still fail at the l
 
 ### 1. Install Ubuntu 24.04 OS
 
-Download the Ubuntu 24.04 ISO file from the official Ubuntu website and flash it onto your USB drive, then install it on your machine. I have a laptop that I just bought after graduating from university, which has two SSDs: one with 1 TB of storage for my Windows OS, and another with 420 GB where I will install Ubuntu alongside Windows 11.
+Download the Ubuntu 24.04 ISO file from the official Ubuntu website and flash it onto your USB drive, then install it on your machine. I have a laptop, which has two SSDs: one with 1 TB of storage for my Windows OS, and another with 420 GB where I will install Ubuntu alongside Windows 11.
 
 If you have the money, you can buy a machine and install Ubuntu directly on it. If you don't have a powerful device, you can use a cloud service provider (such as Azure or AWS) for this purpose.
 
@@ -128,6 +128,7 @@ This command will build all Docker container types for all supported platforms. 
 Once the containers are built and published, navigate to the root of this project and run:
 
 ```bash
+sudo ./main.sh godot --clean-release
 sudo ./main.sh godot --build --release
 ```
 
