@@ -156,7 +156,6 @@ prepare_godot_source() {
     git reset --hard
     git clean -fdx
     git pull --rebase origin "${git_branch}" || true
-    git clone --branch ${LIMBO_AI_TAG} --single-branch https://github.com/limbonaut/limboai.git modules/limboai
     popd
 
     # Extract version information
