@@ -156,7 +156,12 @@ prepare_godot_source() {
     git reset --hard
     git clean -fdx
     git pull --rebase origin "${git_branch}" || true
+    git clone --branch ${LIMBO_AI_TAG} --single-branch https://github.com/limbonaut/limboai.git modules/limboai
     popd
+
+    # Extract version information
+    godot_version=$(python3 extract_version.py --get-version)
+    godot_version_status="$(python3 extract_version.py --get-version-status)${VERSION_STATUS_PATCH}"
 
     pushd "${basedir}/git"
     echo "Creating Godot tarball..."
@@ -367,10 +372,6 @@ main() {
     if [ $build -eq 1 ]; then
         build
     fi
-
-    # Extract version information
-    godot_version=$(python3 extract_version.py --get-version)
-    godot_version_status="$(python3 extract_version.py --get-version-status)${VERSION_STATUS_PATCH}"
 
     if [ $release -eq 1 ]; then
         local release_sh_path
