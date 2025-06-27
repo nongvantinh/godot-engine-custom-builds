@@ -372,6 +372,9 @@ main() {
         build
     fi
 
+    godot_version=$(python3 extract_version.py --get-version) || true
+    godot_version_status="$(python3 extract_version.py --get-version-status)${VERSION_STATUS_PATCH}" || true
+
     if [ $release -eq 1 ]; then
         local release_sh_path
         local file="prepare_release.sh"
