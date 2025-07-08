@@ -23,12 +23,6 @@ pull_images() {
         return
     fi
     
-    echo "Fetching images"
-
-    login_to_github_container_registry  --registry "${registry}"     \
-                                        --username "${username}"     \
-                                        --pat_token "${pat_token}"
-
     echo "Fetching images from GitHub Container Registry..."
 
     windows_container="${registry}/${username}/godot-windows:${container_version}-${image_version}"
