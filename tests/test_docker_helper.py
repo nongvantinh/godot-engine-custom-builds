@@ -161,8 +161,10 @@ class TestRunBuild:
             )
 
         cmd = mock_run.call_args[0][0]
-        assert "platform=linuxbsd" in cmd
-        assert "target=editor" in cmd
+        # Flags are embedded in the bash -c shell script string.
+        shell_arg = cmd[cmd.index("-c") + 1]
+        assert "platform=linuxbsd" in shell_arg
+        assert "target=editor" in shell_arg
 
     def test_env_setup_wraps_command_in_bash(self):
         mock_result = MagicMock()
@@ -197,5 +199,8 @@ class TestRunBuild:
             )
 
         cmd = mock_run.call_args[0][0]
-        assert "bash" not in cmd
-        assert "scons" in cmd
+        # Always uses bash -c for consistent chaining of the copy step.
+        assert "bash" in cmd
+        shell_arg = cmd[cmd.index("-c") + 1]
+        assert "scons platform=linuxbsd" in shell_arg
+        assert "cp -rvp bin/godot*" in shell_arg

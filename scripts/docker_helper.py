@@ -107,17 +107,23 @@ def run_build(
     int
         Exit code of the Docker subprocess (0 = success).
     """
-    base_cmd = [
+    # Always use bash -c so we can chain the copy step after the build.
+    # SCons writes binaries to bin/ inside the source tree (/root/godot/bin).
+    # We always copy them to /root/out so the output_dir mount collects them.
+    copy_step = "mkdir -p /root/out && cp -rvp bin/godot* /root/out/"
+    if env_setup:
+        shell_script = f"{env_setup} && scons {scons_flags} && {copy_step}"
+    else:
+        shell_script = f"scons {scons_flags} && {copy_step}"
+
+    cmd = [
         "docker", "run", "--rm",
         "--workdir", "/root/godot",
         "-v", f"{source_dir}:/root/godot",
         "-v", f"{output_dir}:/root/out",
         image,
+        "bash", "-c", shell_script,
     ]
-    if env_setup:
-        cmd = base_cmd + ["bash", "-c", f"{env_setup} && scons {scons_flags}"]
-    else:
-        cmd = base_cmd + ["scons"] + scons_flags.split()
 
     if dry_run:
         logger.info("[dry-run] Would run: %s", " ".join(cmd))
