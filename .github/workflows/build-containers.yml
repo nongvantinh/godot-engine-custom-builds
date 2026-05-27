@@ -1,0 +1,96 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - 'containers/Dockerfile.*'
+  workflow_dispatch:
+    inputs:
+      godot_version:
+        description: 'Godot version tag for images (e.g. 4.7)'
+        required: false
+        default: '4.7'
+
+env:
+  REGISTRY: ghcr.io
+  USERNAME: nongvantinh
+  # F-02 pattern: user input goes into env var; shell steps reference $GODOT_VERSION_INPUT
+  GODOT_VERSION_INPUT: ${{ github.event.inputs.godot_version || '4.7' }}
+
+jobs:
+  build-base:
+    name: Build base image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set version
+        id: version
+        run: echo "version=$GODOT_VERSION_INPUT" >> $GITHUB_OUTPUT
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.USERNAME }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push godot-fedora (base)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: containers
+          file: containers/Dockerfile.base
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.USERNAME }}/godot-fedora:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.USERNAME }}/godot-fedora:latest
+
+  build-platforms:
+    name: Build ${{ matrix.platform }} image
+    runs-on: ubuntu-latest
+    needs: build-base
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - platform: linux
+            dockerfile: Dockerfile.linux
+            image: godot-linux
+          - platform: windows
+            dockerfile: Dockerfile.windows
+            image: godot-windows
+          - platform: android
+            dockerfile: Dockerfile.android
+            image: godot-android
+          - platform: web
+            dockerfile: Dockerfile.web
+            image: godot-web
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.USERNAME }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.platform }} image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: containers
+          file: containers/${{ matrix.dockerfile }}
+          push: true
+          build-args: |
+            IMAGE_VERSION=${{ needs.build-base.outputs.version }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.USERNAME }}/${{ matrix.image }}:${{ needs.build-base.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.USERNAME }}/${{ matrix.image }}:latest

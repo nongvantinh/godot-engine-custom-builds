@@ -161,5 +161,46 @@ class TestRunBuild:
             )
 
         cmd = mock_run.call_args[0][0]
-        assert "platform=linuxbsd" in cmd
-        assert "target=editor" in cmd
+        # Flags are embedded in the bash -c shell script string.
+        shell_arg = cmd[cmd.index("-c") + 1]
+        assert "platform=linuxbsd" in shell_arg
+        assert "target=editor" in shell_arg
+
+    def test_env_setup_wraps_command_in_bash(self):
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with patch("scripts.docker_helper.subprocess.run", return_value=mock_result) as mock_run:
+            run_build(
+                image="ghcr.io/test/linux:4.3",
+                scons_flags="platform=linuxbsd target=editor",
+                source_dir="/tmp/godot",
+                output_dir="/tmp/out",
+                env_setup="export PATH=$GODOT_SDK_LINUX_X86_64/bin:$BASE_PATH",
+            )
+
+        cmd = mock_run.call_args[0][0]
+        assert "bash" in cmd
+        assert "-c" in cmd
+        shell_arg = cmd[cmd.index("-c") + 1]
+        assert "export PATH=$GODOT_SDK_LINUX_X86_64/bin:$BASE_PATH" in shell_arg
+        assert "scons platform=linuxbsd target=editor" in shell_arg
+
+    def test_no_env_setup_does_not_wrap_in_bash(self):
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with patch("scripts.docker_helper.subprocess.run", return_value=mock_result) as mock_run:
+            run_build(
+                image="ghcr.io/test/linux:4.3",
+                scons_flags="platform=linuxbsd",
+                source_dir="/tmp/godot",
+                output_dir="/tmp/out",
+            )
+
+        cmd = mock_run.call_args[0][0]
+        # Always uses bash -c for consistent chaining of the copy step.
+        assert "bash" in cmd
+        shell_arg = cmd[cmd.index("-c") + 1]
+        assert "scons platform=linuxbsd" in shell_arg
+        assert "cp -rvp bin/godot*" in shell_arg
