@@ -1,6 +1,5 @@
 FROM fedora:43
 
-ARG IMAGE_VERSION=latest
 ARG REPO_URL="https://github.com/nongvantinh/godot-engine-custom-builds"
 
 LABEL "org.opencontainers.image.source"="$REPO_URL"
@@ -15,4 +14,4 @@ RUN dnf -y install --setopt=install_weak_deps=False \
       dotnet-sdk-8.0 && \
     pip install scons==4.10.1
 
-CMD /bin/bash
+CMD ["/bin/bash"]

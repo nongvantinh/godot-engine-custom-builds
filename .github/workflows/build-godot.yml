@@ -35,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [linux]  # Override via workflow_dispatch for other platforms
+        platform: ${{ fromJson(format('["{0}"]', join(split(github.event.inputs.platforms || 'linux', ','), '","'))) }}
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

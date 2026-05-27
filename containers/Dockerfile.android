@@ -21,4 +21,4 @@ RUN dnf -y install --setopt=install_weak_deps=False \
     yes | cmdline-tools/bin/sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" --licenses && \
     cmdline-tools/bin/sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" "ndk;${ANDROID_NDK_VERSION}" 'cmdline-tools;latest' 'build-tools;35.0.1' 'platforms;android-35' 'cmake;3.31.6'
 
-CMD /bin/bash
+CMD ["/bin/bash"]

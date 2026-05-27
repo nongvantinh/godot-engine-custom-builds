@@ -46,4 +46,4 @@ RUN dnf install -y wayland-devel && \
     ln -s arm-godot-linux-gnueabihf-objcopy bin/objcopy && \
     ln -s arm-godot-linux-gnueabihf-strip bin/strip
 
-CMD /bin/bash
+CMD ["/bin/bash"]
