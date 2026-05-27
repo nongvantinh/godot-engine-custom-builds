@@ -32,6 +32,8 @@ jobs:
       # F-02 fix: inputs go into env vars; shell steps reference $GODOT_BRANCH / $GODOT_VERSION
       GODOT_BRANCH: ${{ github.event.inputs.godot_branch || '4.7.dev1' }}
       GODOT_VERSION: ${{ github.event.inputs.godot_version || '4.7.dev1' }}
+      # F-07 fix: matrix.platform (user-controlled) goes into env var; never interpolated inline
+      BUILD_PLATFORM: ${{ matrix.platform }}
     strategy:
       fail-fast: false
       matrix:
@@ -72,30 +74,33 @@ jobs:
 
           [[platforms]]
           name = "linux"
-          image = "ghcr.io/nongvantinh/linux-editor:${GODOT_VERSION%.*}"
-          scons_flags = "platform=linuxbsd"
+          image = "ghcr.io/nongvantinh/godot-linux:${GODOT_VERSION%.*}"
+          scons_flags = "platform=linuxbsd arch=x86_64"
+          env_setup = "export PATH=\$GODOT_SDK_LINUX_X86_64/bin:\$BASE_PATH"
 
           [[platforms]]
           name = "windows"
-          image = "ghcr.io/nongvantinh/windows:${GODOT_VERSION%.*}"
-          scons_flags = "platform=windows"
+          image = "ghcr.io/nongvantinh/godot-windows:${GODOT_VERSION%.*}"
+          scons_flags = "platform=windows arch=x86_64 use_mingw=yes mingw_prefix=/root/llvm-mingw"
 
           [[platforms]]
           name = "android"
-          image = "ghcr.io/nongvantinh/android:${GODOT_VERSION%.*}"
+          image = "ghcr.io/nongvantinh/godot-android:${GODOT_VERSION%.*}"
           scons_flags = "platform=android"
 
           [[platforms]]
           name = "web"
-          image = "ghcr.io/nongvantinh/web:${GODOT_VERSION%.*}"
+          image = "ghcr.io/nongvantinh/godot-web:${GODOT_VERSION%.*}"
           scons_flags = "platform=web"
+          env_setup = "source /root/emsdk/emsdk_env.sh"
           EOF
 
       - name: Build Godot for ${{ matrix.platform }}
+        # F-07 fix: use $BUILD_PLATFORM env var instead of inline ${{ matrix.platform }}
         run: |
           mkdir -p output
           uv run python build-godot.py build \
-            --platform ${{ matrix.platform }} \
+            --platform "$BUILD_PLATFORM" \
             --target editor \
             --verbose
 

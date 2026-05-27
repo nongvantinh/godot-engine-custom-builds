@@ -15,6 +15,8 @@ on:
 env:
   REGISTRY: ghcr.io
   USERNAME: nongvantinh
+  # F-02 pattern: user input goes into env var; shell steps reference $GODOT_VERSION_INPUT
+  GODOT_VERSION_INPUT: ${{ github.event.inputs.godot_version || '4.7' }}
 
 jobs:
   build-base:
@@ -30,7 +32,7 @@ jobs:
 
       - name: Set version
         id: version
-        run: echo "version=${{ github.event.inputs.godot_version || '4.7' }}" >> $GITHUB_OUTPUT
+        run: echo "version=$GODOT_VERSION_INPUT" >> $GITHUB_OUTPUT
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -61,16 +63,16 @@ jobs:
         include:
           - platform: linux
             dockerfile: Dockerfile.linux
-            image: linux-editor
+            image: godot-linux
           - platform: windows
             dockerfile: Dockerfile.windows
-            image: windows
+            image: godot-windows
           - platform: android
             dockerfile: Dockerfile.android
-            image: android
+            image: godot-android
           - platform: web
             dockerfile: Dockerfile.web
-            image: web
+            image: godot-web
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
