@@ -1,0 +1,127 @@
+name: Build Godot Engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      godot_branch:
+        description: 'Godot source branch to build'
+        required: false
+        default: '4.7.dev1'
+      godot_version:
+        description: 'Version tag for the release (e.g. 4.7.dev1)'
+        required: false
+        default: '4.7.dev1'
+      platforms:
+        description: 'Platforms to build (comma-separated: linux,windows,android,web)'
+        required: false
+        default: 'linux'
+
+env:
+  REGISTRY: ghcr.io
+  USERNAME: nongvantinh
+
+jobs:
+  build:
+    name: Build Godot (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux]  # Override via workflow_dispatch for other platforms
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python via uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Checkout Godot source branch
+        run: |
+          git -C upstream/godot fetch origin ${{ github.event.inputs.godot_branch || '4.7.dev1' }}
+          git -C upstream/godot checkout ${{ github.event.inputs.godot_branch || '4.7.dev1' }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.USERNAME }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write config.toml
+        run: |
+          VERSION="${{ github.event.inputs.godot_version || '4.7.dev1' }}"
+          cat > config.toml << EOF
+          registry = "ghcr.io"
+          username = "nongvantinh"
+          godot_version = "${VERSION}"
+
+          [scons]
+          use_lto = false
+          extra_flags = ""
+
+          [[platforms]]
+          name = "linux"
+          image = "ghcr.io/nongvantinh/linux-editor:4.7"
+          scons_flags = "platform=linuxbsd"
+
+          [[platforms]]
+          name = "windows"
+          image = "ghcr.io/nongvantinh/windows:4.7"
+          scons_flags = "platform=windows"
+
+          [[platforms]]
+          name = "android"
+          image = "ghcr.io/nongvantinh/android:4.7"
+          scons_flags = "platform=android"
+
+          [[platforms]]
+          name = "web"
+          image = "ghcr.io/nongvantinh/web:4.7"
+          scons_flags = "platform=web"
+          EOF
+
+      - name: Build Godot for ${{ matrix.platform }}
+        run: |
+          mkdir -p output
+          uv run python build-godot.py build \
+            --platform ${{ matrix.platform }} \
+            --target editor \
+            --verbose
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-${{ github.event.inputs.godot_version || '4.7.dev1' }}-${{ matrix.platform }}
+          path: output/
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.godot_version || '4.7.dev1' }}-custom-1
+          name: "Godot ${{ github.event.inputs.godot_version || '4.7.dev1' }} (custom build)"
+          body: |
+            Custom Godot ${{ github.event.inputs.godot_version || '4.7.dev1' }} build from branch [${{ github.event.inputs.godot_branch || '4.7.dev1' }}](https://github.com/nongvantinh/godot/tree/${{ github.event.inputs.godot_branch || '4.7.dev1' }}).
+
+            Built with updated Docker images (Fedora 43, SCons 4.10.1).
+          files: dist/**/*
+          draft: false
+          prerelease: true

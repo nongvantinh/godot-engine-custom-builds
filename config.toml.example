@@ -32,7 +32,7 @@ username = "nongvantinh"
 # ---------------------------------------------------------------------------
 
 # Godot engine version string — used in SCons flags and image tags.
-godot_version = "4.3"
+godot_version = "4.7"
 
 # ---------------------------------------------------------------------------
 # Global SCons flags (applied to every build)
@@ -57,22 +57,22 @@ extra_flags = ""
 
 [[platforms]]
 name = "linux"
-image = "ghcr.io/nongvantinh/linux-editor:4.3"
+image = "ghcr.io/nongvantinh/linux-editor:4.7"
 scons_flags = "platform=linuxbsd"
 
 [[platforms]]
 name = "windows"
-image = "ghcr.io/nongvantinh/windows:4.3"
+image = "ghcr.io/nongvantinh/windows:4.7"
 scons_flags = "platform=windows"
 
 [[platforms]]
 name = "android"
-image = "ghcr.io/nongvantinh/android:4.3"
+image = "ghcr.io/nongvantinh/android:4.7"
 scons_flags = "platform=android"
 
 [[platforms]]
 name = "web"
-image = "ghcr.io/nongvantinh/web:4.3"
+image = "ghcr.io/nongvantinh/web:4.7"
 scons_flags = "platform=web"
 
 # ---------------------------------------------------------------------------
