@@ -94,6 +94,57 @@ uv run python build-godot.py build [OPTIONS]
 | `--verbose` | flag | No | off | Enable DEBUG-level logging. |
 | `--dry-run` | flag | No | off | Print Docker commands without executing them. |
 
+### `containers` sub-command
+
+Build (and optionally push) Godot Docker container images from the local
+`containers/` directory.
+
+```
+uv run python build-godot.py containers [OPTIONS]
+```
+
+| Flag | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `--type` | `str` (comma-separated) | **Yes** | — | Container type(s): `base`, `linux`, `windows`, `android`, `web`, or `all`. Multiple values are comma-separated. |
+| `--version` | `str` | No | `godot_version` from config | Image version tag, e.g. `4.7`. |
+| `--push` | flag | No | off | Push images to GHCR after building. Requires `GHCR_PAT` env var; skips gracefully when absent. |
+| `--config` | `path` | No | `./config.toml` | Path to the TOML configuration file. |
+| `--dry-run` | flag | No | off | Print Docker commands without executing them. |
+
+#### Image naming
+
+| Type | Local image | GHCR image |
+|---|---|---|
+| `base` | `godot-fedora:{version}` | `ghcr.io/{username}/godot-fedora:{version}` |
+| `linux` | `godot-linux:{version}` | `ghcr.io/{username}/godot-linux:{version}` |
+| `windows` | `godot-windows:{version}` | `ghcr.io/{username}/godot-windows:{version}` |
+| `android` | `godot-android:{version}` | `ghcr.io/{username}/godot-android:{version}` |
+| `web` | `godot-web:{version}` | `ghcr.io/{username}/godot-web:{version}` |
+
+#### Build order
+
+`base` is always built first. When any non-base type is requested, `base` is
+automatically included and built before the other types.
+
+#### Example invocations
+
+```bash
+# Build only the Linux container image
+uv run python build-godot.py containers --type linux --version 4.7
+
+# Build all images and push them to GHCR
+export GHCR_PAT=<your-github-personal-access-token>
+uv run python build-godot.py containers --type all --version 4.7 --push
+
+# Build multiple types without pushing
+uv run python build-godot.py containers --type linux,windows --version 4.7
+
+# Dry run — print Docker commands without executing them
+uv run python build-godot.py containers --type all --version 4.7 --dry-run
+```
+
+---
+
 ### Exit codes
 
 | Code | Meaning |

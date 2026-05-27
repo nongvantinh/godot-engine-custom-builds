@@ -4,6 +4,7 @@
 Usage
 -----
     uv run python build-godot.py build --platform linux --target editor
+    uv run python build-godot.py containers --type linux --version 4.7
     uv run python build-godot.py --help
 
 Exit codes
@@ -39,6 +40,7 @@ if sys.version_info < (3, 11):
 # Project-local imports (after version guard so we get a clean error first).
 # ---------------------------------------------------------------------------
 from scripts.config import ConfigError, get_platform_config, load_config
+from scripts.container_builder import build_and_push
 from scripts.docker_helper import BuildError, DockerUnavailableError, ensure_docker, login, pull_image, run_build
 from scripts.patcher import apply_patches
 
@@ -134,6 +136,52 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Print Docker commands that would be run without executing them.",
+    )
+
+    # ------------------------------------------------------------------
+    # containers sub-command
+    # ------------------------------------------------------------------
+    containers_p = sub.add_parser(
+        "containers",
+        help="Build (and optionally push) Godot Docker container images.",
+        description=(
+            "Build Godot container images from the Dockerfiles in the "
+            "containers/ directory, then optionally push them to GHCR."
+        ),
+    )
+    containers_p.add_argument(
+        "--type",
+        required=True,
+        metavar="TYPE[,TYPE...]",
+        help=(
+            "Container type(s), comma-separated. "
+            "Supported: base, linux, windows, android, web, all."
+        ),
+    )
+    containers_p.add_argument(
+        "--version",
+        default=None,
+        metavar="VERSION",
+        help=(
+            "Image version tag, e.g. 4.7. "
+            "Defaults to 'godot_version' from config.toml."
+        ),
+    )
+    containers_p.add_argument(
+        "--push",
+        action="store_true",
+        help="Push images to GHCR after building (requires GHCR_PAT env var).",
+    )
+    containers_p.add_argument(
+        "--config",
+        default="./config.toml",
+        metavar="PATH",
+        help="Path to the TOML configuration file.  (default: ./config.toml)",
+    )
+    containers_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print Docker commands without executing them.",
     )
 
     return parser
@@ -320,6 +368,43 @@ def _build_platform(
 # ---------------------------------------------------------------------------
 
 
+def cmd_containers(args: argparse.Namespace) -> int:
+    """Handle the ``containers`` sub-command."""
+    _configure_logging(False)
+    logger = logging.getLogger(__name__)
+
+    # Load and validate config.
+    try:
+        config = load_config(args.config)
+    except ConfigError as exc:
+        logger.error("%s", exc)
+        return 1
+
+    registry: str = config["registry"]
+    username: str = config["username"]
+
+    # Resolve version: CLI flag takes priority, then config default.
+    version: str = args.version if args.version else config["godot_version"]
+
+    # Parse type list.
+    types: list[str] = [t.strip().lower() for t in args.type.split(",") if t.strip()]
+    if not types:
+        logger.error("No container types specified. Use --type base,linux,...")
+        return 1
+
+    containers_dir: Path = _SCRIPT_DIR / "containers"
+
+    return build_and_push(
+        types=types,
+        version=version,
+        containers_dir=containers_dir,
+        registry=registry,
+        username=username,
+        push=args.push,
+        dry_run=args.dry_run,
+    )
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     """Handle the ``build`` sub-command."""
     _configure_logging(args.verbose)
@@ -382,6 +467,9 @@ def main() -> int:
 
     if args.command == "build":
         return cmd_build(args)
+
+    if args.command == "containers":
+        return cmd_containers(args)
 
     # Should never reach here because sub.required = True.
     parser.print_help()

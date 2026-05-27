@@ -57,22 +57,22 @@ extra_flags = ""
 
 [[platforms]]
 name = "linux"
-image = "ghcr.io/nongvantinh/linux-editor:4.7"
+image = "ghcr.io/nongvantinh/godot-linux:4.7"
 scons_flags = "platform=linuxbsd"
 
 [[platforms]]
 name = "windows"
-image = "ghcr.io/nongvantinh/windows:4.7"
+image = "ghcr.io/nongvantinh/godot-windows:4.7"
 scons_flags = "platform=windows"
 
 [[platforms]]
 name = "android"
-image = "ghcr.io/nongvantinh/android:4.7"
+image = "ghcr.io/nongvantinh/godot-android:4.7"
 scons_flags = "platform=android"
 
 [[platforms]]
 name = "web"
-image = "ghcr.io/nongvantinh/web:4.7"
+image = "ghcr.io/nongvantinh/godot-web:4.7"
 scons_flags = "platform=web"
 
 # ---------------------------------------------------------------------------
