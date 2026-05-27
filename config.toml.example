@@ -58,12 +58,14 @@ extra_flags = ""
 [[platforms]]
 name = "linux"
 image = "ghcr.io/nongvantinh/godot-linux:4.7"
-scons_flags = "platform=linuxbsd"
+scons_flags = "platform=linuxbsd arch=x86_64"
+# Sets up the x86_64 buildroot cross-compiler before running SCons.
+env_setup = "export PATH=$GODOT_SDK_LINUX_X86_64/bin:$BASE_PATH"
 
 [[platforms]]
 name = "windows"
 image = "ghcr.io/nongvantinh/godot-windows:4.7"
-scons_flags = "platform=windows"
+scons_flags = "platform=windows arch=x86_64 use_mingw=yes mingw_prefix=/root/llvm-mingw"
 
 [[platforms]]
 name = "android"
@@ -74,6 +76,8 @@ scons_flags = "platform=android"
 name = "web"
 image = "ghcr.io/nongvantinh/godot-web:4.7"
 scons_flags = "platform=web"
+# Activates the Emscripten SDK environment before running SCons.
+env_setup = "source /root/emsdk/emsdk_env.sh"
 
 # ---------------------------------------------------------------------------
 # Signing / artefact configuration (optional section)

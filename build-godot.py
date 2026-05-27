@@ -335,6 +335,7 @@ def _build_platform(
             source_dir=str(source_dir.resolve()),
             output_dir=str(output_dir.resolve()),
             dry_run=dry_run,
+            env_setup=platform_cfg.get("env_setup", ""),
         )
         if rc != 0:
             logger.error("Build exited with code %d.", rc)

@@ -78,6 +78,7 @@ def run_build(
     source_dir: str,
     output_dir: str,
     dry_run: bool = False,
+    env_setup: str = "",
 ) -> int:
     """Run a Godot build inside *image*.
 
@@ -96,19 +97,27 @@ def run_build(
         Absolute path where build artefacts should be written.
     dry_run:
         When ``True``, print the command and return 0 without running it.
+    env_setup:
+        Optional shell snippet run before ``scons`` inside the container
+        (e.g. ``"export PATH=$GODOT_SDK_LINUX_X86_64/bin:$BASE_PATH"``).
+        When set the entrypoint becomes ``bash -c "<env_setup> && scons ..."``.
 
     Returns
     -------
     int
         Exit code of the Docker subprocess (0 = success).
     """
-    cmd = [
+    base_cmd = [
         "docker", "run", "--rm",
+        "--workdir", "/root/godot",
         "-v", f"{source_dir}:/root/godot",
         "-v", f"{output_dir}:/root/out",
         image,
-        "scons",
-    ] + scons_flags.split()
+    ]
+    if env_setup:
+        cmd = base_cmd + ["bash", "-c", f"{env_setup} && scons {scons_flags}"]
+    else:
+        cmd = base_cmd + ["scons"] + scons_flags.split()
 
     if dry_run:
         logger.info("[dry-run] Would run: %s", " ".join(cmd))
