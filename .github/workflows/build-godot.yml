@@ -24,41 +24,47 @@ jobs:
   build:
     name: Build Godot (${{ matrix.platform }})
     runs-on: ubuntu-latest
+    # F-03 fix: build job only needs packages:read; contents:write is for release job only
     permissions:
-      contents: write
+      contents: read
       packages: read
+    env:
+      # F-02 fix: inputs go into env vars; shell steps reference $GODOT_BRANCH / $GODOT_VERSION
+      GODOT_BRANCH: ${{ github.event.inputs.godot_branch || '4.7.dev1' }}
+      GODOT_VERSION: ${{ github.event.inputs.godot_version || '4.7.dev1' }}
     strategy:
       fail-fast: false
       matrix:
         platform: [linux]  # Override via workflow_dispatch for other platforms
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: recursive
 
       - name: Set up Python via uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Checkout Godot source branch
+        # F-02 fix: use env var, not inline expression
         run: |
-          git -C upstream/godot fetch origin ${{ github.event.inputs.godot_branch || '4.7.dev1' }}
-          git -C upstream/godot checkout ${{ github.event.inputs.godot_branch || '4.7.dev1' }}
+          git -C upstream/godot fetch origin "$GODOT_BRANCH"
+          git -C upstream/godot checkout "$GODOT_BRANCH"
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ env.USERNAME }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Write config.toml
+        # F-06 fix: use $GODOT_VERSION for image tags (not hardcoded 4.7)
         run: |
-          VERSION="${{ github.event.inputs.godot_version || '4.7.dev1' }}"
           cat > config.toml << EOF
           registry = "ghcr.io"
           username = "nongvantinh"
-          godot_version = "${VERSION}"
+          godot_version = "${GODOT_VERSION}"
 
           [scons]
           use_lto = false
@@ -66,22 +72,22 @@ jobs:
 
           [[platforms]]
           name = "linux"
-          image = "ghcr.io/nongvantinh/linux-editor:4.7"
+          image = "ghcr.io/nongvantinh/linux-editor:${GODOT_VERSION%.*}"
           scons_flags = "platform=linuxbsd"
 
           [[platforms]]
           name = "windows"
-          image = "ghcr.io/nongvantinh/windows:4.7"
+          image = "ghcr.io/nongvantinh/windows:${GODOT_VERSION%.*}"
           scons_flags = "platform=windows"
 
           [[platforms]]
           name = "android"
-          image = "ghcr.io/nongvantinh/android:4.7"
+          image = "ghcr.io/nongvantinh/android:${GODOT_VERSION%.*}"
           scons_flags = "platform=android"
 
           [[platforms]]
           name = "web"
-          image = "ghcr.io/nongvantinh/web:4.7"
+          image = "ghcr.io/nongvantinh/web:${GODOT_VERSION%.*}"
           scons_flags = "platform=web"
           EOF
 
@@ -94,9 +100,9 @@ jobs:
             --verbose
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: godot-${{ github.event.inputs.godot_version || '4.7.dev1' }}-${{ matrix.platform }}
+          name: godot-${{ env.GODOT_VERSION }}-${{ matrix.platform }}
           path: output/
 
   release:
@@ -105,21 +111,24 @@ jobs:
     needs: build
     permissions:
       contents: write
+    env:
+      GODOT_BRANCH: ${{ github.event.inputs.godot_branch || '4.7.dev1' }}
+      GODOT_VERSION: ${{ github.event.inputs.godot_version || '4.7.dev1' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist/
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          tag_name: ${{ github.event.inputs.godot_version || '4.7.dev1' }}-custom-1
-          name: "Godot ${{ github.event.inputs.godot_version || '4.7.dev1' }} (custom build)"
+          tag_name: ${{ env.GODOT_VERSION }}-custom-1
+          name: "Godot ${{ env.GODOT_VERSION }} (custom build)"
           body: |
-            Custom Godot ${{ github.event.inputs.godot_version || '4.7.dev1' }} build from branch [${{ github.event.inputs.godot_branch || '4.7.dev1' }}](https://github.com/nongvantinh/godot/tree/${{ github.event.inputs.godot_branch || '4.7.dev1' }}).
+            Custom Godot ${{ env.GODOT_VERSION }} build from branch [${{ env.GODOT_BRANCH }}](https://github.com/nongvantinh/godot/tree/${{ env.GODOT_BRANCH }}).
 
             Built with updated Docker images (Fedora 43, SCons 4.10.1).
           files: dist/**/*
