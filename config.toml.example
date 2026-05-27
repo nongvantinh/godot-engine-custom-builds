@@ -1,0 +1,90 @@
+# config.toml.example
+#
+# Copy this file to config.toml and fill in your values:
+#
+#   cp config.toml.example config.toml
+#
+# config.toml is listed in .gitignore and MUST NOT be committed.
+#
+# SECRETS POLICY
+# ==============
+# Do NOT add 'ghcr_pat', 'token', or any credential key to this file.
+# The GHCR Personal Access Token is read exclusively from the GHCR_PAT
+# environment variable at runtime:
+#
+#   export GHCR_PAT=<your-github-personal-access-token>
+#
+# build-godot.py will error out with exit code 1 if it detects a secret
+# key in config.toml.
+
+# ---------------------------------------------------------------------------
+# Registry configuration
+# ---------------------------------------------------------------------------
+
+# Container registry hostname.
+registry = "ghcr.io"
+
+# Registry username (used as the image-path prefix).
+username = "nongvantinh"
+
+# ---------------------------------------------------------------------------
+# Godot version
+# ---------------------------------------------------------------------------
+
+# Godot engine version string — used in SCons flags and image tags.
+godot_version = "4.3"
+
+# ---------------------------------------------------------------------------
+# Global SCons flags (applied to every build)
+# ---------------------------------------------------------------------------
+
+[scons]
+# Enable link-time optimisation.  Increases build time significantly.
+use_lto = false
+
+# Raw SCons flags appended verbatim to every build invocation.
+# Example: "verbose=yes" or "debug_symbols=yes"
+extra_flags = ""
+
+# ---------------------------------------------------------------------------
+# Platform table — one [[platforms]] entry per supported platform.
+#
+# Required keys per entry:
+#   name        — platform identifier passed to --platform
+#   image       — full container image reference (registry/namespace/image:tag)
+#   scons_flags — platform-specific SCons flags
+# ---------------------------------------------------------------------------
+
+[[platforms]]
+name = "linux"
+image = "ghcr.io/nongvantinh/linux-editor:4.3"
+scons_flags = "platform=linuxbsd"
+
+[[platforms]]
+name = "windows"
+image = "ghcr.io/nongvantinh/windows:4.3"
+scons_flags = "platform=windows"
+
+[[platforms]]
+name = "android"
+image = "ghcr.io/nongvantinh/android:4.3"
+scons_flags = "platform=android"
+
+[[platforms]]
+name = "web"
+image = "ghcr.io/nongvantinh/web:4.3"
+scons_flags = "platform=web"
+
+# ---------------------------------------------------------------------------
+# Signing / artefact configuration (optional section)
+# ---------------------------------------------------------------------------
+
+[signing]
+# Path to the Android keystore file used to sign release APKs.
+android_keystore = ""
+
+# Android key alias used for signing.
+android_key_alias = ""
+
+# android_key_password — NEVER in this file.
+# Set the ANDROID_KEY_PASSWORD environment variable instead.
