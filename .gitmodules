@@ -1,0 +1,12 @@
+[submodule "upstream/godot-build-scripts"]
+	path = upstream/godot-build-scripts
+	url = https://github.com/godotengine/godot-build-scripts.git
+	update = checkout
+[submodule "upstream/build-containers"]
+	path = upstream/build-containers
+	url = https://github.com/godotengine/build-containers.git
+	update = checkout
+[submodule "upstream/godot"]
+	path = upstream/godot
+	url = https://github.com/nongvantinh/godot.git
+	update = checkout

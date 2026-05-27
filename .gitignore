@@ -1,1 +1,14 @@
 *.log
+
+# Build configuration — contains registry/username; must not be committed.
+# Copy config.toml.example to config.toml to get started.
+config.toml
+
+# Build output
+output/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
