@@ -14,6 +14,9 @@
 #
 #   export GHCR_PAT=<your-github-personal-access-token>
 #
+# `gh` authentication (for publishing Releases) is also read from the
+# environment / `gh auth login` — never from this file.
+#
 # build-godot.py will error out with exit code 1 if it detects a secret
 # key in config.toml.
 
@@ -28,14 +31,58 @@ registry = "ghcr.io"
 username = "nongvantinh"
 
 # ---------------------------------------------------------------------------
-# Godot version
+# Godot source / version
 # ---------------------------------------------------------------------------
 
 # Godot engine version string — used in SCons flags and image tags.
 godot_version = "4.7"
 
+# Branch / treeish of `godot_repo` to build. Authoritative engine source for
+# this Release.
+git_branch = "4.7.dev1"
+
+# Fork slug of the Godot source repository. The `--godot-repo` CLI flag
+# overrides this value.
+godot_repo = "nongvantinh/godot"
+
 # ---------------------------------------------------------------------------
-# Global SCons flags (applied to every build)
+# Build matrix — what to build (flavor x kind x mono x arch).
+#
+# build-godot.py derives the SCons invocations from this matrix, so operators
+# no longer hand-edit raw SCons flag strings.
+# ---------------------------------------------------------------------------
+
+[build]
+# Flavors to produce. One or more of: release, debug, release_debug.
+#   release       -> production=yes, optimized, no dev/debug symbols
+#   debug         -> dev_build=yes debug_symbols=yes
+#   release_debug -> debug_symbols=yes, optimized (no production=yes)
+flavors = ["release", "debug", "release_debug"]
+
+# Artifact kinds to build. One or more of: editor, templates.
+kinds = ["editor", "templates"]
+
+# Mono variants to produce. One or more of: on, off.
+#   on  -> Mono/.NET build
+#   off -> classical build
+mono = ["on", "off"]
+
+# SCons -j parallelism. Defaults to `nproc - 2` (leave 2 cores for the system;
+# floor of 1) — on a 16-core host this is 14. The value is computed dynamically
+# from the host's core count, so omit this key to track the host. The --jobs
+# CLI flag overrides it. Lower it if Mono/.NET builds OOM.
+# build_jobs = 14
+
+# Xcode / Apple SDK version strings the operator's Xcode_*.xip ships. These are
+# threaded into the Apple container chain (Dockerfile.xcode/Dockerfile.osx) so
+# the Dockerfiles are not hand-edited per Xcode bump. Xcode 26.1.1 ships the
+# macOS 26.1 SDK; the extract step derives the exact iPhoneOS string from the
+# xip layout, so only XCODE_SDKV + APPLE_SDKV (macOS) need to be set here.
+xcode_sdkv = "26.1.1"
+apple_sdkv = "26.1"
+
+# ---------------------------------------------------------------------------
+# Global SCons configuration.
 # ---------------------------------------------------------------------------
 
 [scons]
@@ -46,38 +93,89 @@ use_lto = false
 # Example: "verbose=yes" or "debug_symbols=yes"
 extra_flags = ""
 
+# In-container path to the AccessKit C SDK, passed to SCons as
+# accesskit_sdk_path=... for classical builds.
+accesskit_sdk_path = "/root/accesskit/accesskit-c"
+
+# When true, emit redirect_build_objects=no on every SCons invocation to match
+# the pinned upstream toolchain.
+redirect_build_objects = true
+
 # ---------------------------------------------------------------------------
 # Platform table — one [[platforms]] entry per supported platform.
 #
 # Required keys per entry:
 #   name        — platform identifier passed to --platform
 #   image       — full container image reference (registry/namespace/image:tag)
-#   scons_flags — platform-specific SCons flags
+#   scons_flags — platform-INVARIANT SCons flags only (platform=..., toolchain
+#                 prefixes). arch / target / Mono toggles / flavor flags are
+#                 derived from the [build] matrix and the per-platform `archs`.
+# Optional:
+#   archs       — architectures to build for this platform (full matrix below).
 # ---------------------------------------------------------------------------
 
 [[platforms]]
 name = "linux"
 image = "ghcr.io/nongvantinh/godot-linux:4.7"
-scons_flags = "platform=linuxbsd arch=x86_64"
+scons_flags = "platform=linuxbsd"
+archs = ["x86_64", "x86_32", "arm64", "arm32"]
 # Sets up the x86_64 buildroot cross-compiler before running SCons.
 env_setup = "export PATH=$GODOT_SDK_LINUX_X86_64/bin:$BASE_PATH"
 
 [[platforms]]
 name = "windows"
 image = "ghcr.io/nongvantinh/godot-windows:4.7"
-scons_flags = "platform=windows arch=x86_64 use_mingw=yes mingw_prefix=/root/llvm-mingw"
+scons_flags = "platform=windows use_mingw=yes mingw_prefix=/root/llvm-mingw"
+archs = ["x86_64", "x86_32", "arm64"]
 
 [[platforms]]
 name = "android"
 image = "ghcr.io/nongvantinh/godot-android:4.7"
 scons_flags = "platform=android"
+archs = ["arm64", "arm32", "x86_64", "x86_32"]
 
 [[platforms]]
 name = "web"
 image = "ghcr.io/nongvantinh/godot-web:4.7"
 scons_flags = "platform=web"
+archs = ["wasm32"]
 # Activates the Emscripten SDK environment before running SCons.
 env_setup = "source /root/emsdk/emsdk_env.sh"
+
+[[platforms]]
+name = "macos"
+image = "ghcr.io/nongvantinh/godot-osx:4.7"
+scons_flags = "platform=macos"
+archs = ["universal"]
+
+[[platforms]]
+name = "ios"
+image = "ghcr.io/nongvantinh/godot-ios:4.7"
+scons_flags = "platform=ios"
+archs = ["arm64"]
+
+# ---------------------------------------------------------------------------
+# Release publishing (optional section).
+#
+# The `release` sub-command builds -> packages -> publishes a real GitHub
+# Release attached to `tag`. `gh` must be authenticated in the environment.
+# ---------------------------------------------------------------------------
+
+[release]
+# Existing git tag to attach the Release assets to. The live tag has NO ``v``
+# prefix (matches the upstream Godot convention: ``4.7-dev1``, not ``v4.7-dev1``).
+tag = "4.7-dev1"
+
+# Repository the Release is published on.
+repo = "nongvantinh/godot-build-scripts"
+
+# When true, the `release` sub-command runs `gh release create/upload`.
+# When false, it stops after producing artifacts for a manual upload.
+auto_upload = true
+
+# Release flags. 4.7-dev1 is a dev build, so prerelease=true.
+draft = false
+prerelease = true
 
 # ---------------------------------------------------------------------------
 # Signing / artefact configuration (optional section)

@@ -1,9 +1,13 @@
 # godot-build-scripts
 
-Portable Python build orchestrator for a custom Godot engine fork.  
-Replaces the old Bash scripts (`main.sh`, `shared.sh`, `config.sh`) with a
-single cross-platform CLI (`build-godot.py`) driven by a typed TOML
-configuration file.
+Portable Python build orchestrator for a custom Godot engine fork. A single
+cross-platform CLI (`build-godot.py`) is driven by a typed TOML configuration
+file:
+
+- host orchestration → [`scripts/host_orchestrator.py`](scripts/host_orchestrator.py)
+- per-platform builds → [`scripts/in_container/build_<platform>.py`](scripts/in_container/)
+- release packaging → [`scripts/packager.py`](scripts/packager.py)
+- release publishing → [`scripts/orchestrator.py`](scripts/orchestrator.py) (`gh release`)
 
 ---
 
@@ -12,10 +16,12 @@ configuration file.
 1. [Quick Start](#quick-start)
 2. [CLI Reference](#cli-reference)
 3. [config.toml Key Reference](#configtoml-key-reference)
-4. [Upstream Submodules](#upstream-submodules)
-5. [Patch System](#patch-system)
-6. [config.sh → config.toml Migration](#configsh--configtoml-migration)
-7. [Troubleshooting](#troubleshooting)
+4. [Android signing](#android-signing)
+5. [Upstream Submodules](#upstream-submodules)
+6. [Resumability](#resumability)
+7. [Known limitations](#known-limitations)
+8. [Patch System](#patch-system)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -52,21 +58,83 @@ $EDITOR config.toml
 ### Set secrets
 
 ```bash
-# PAT for pulling images from ghcr.io (never put this in config.toml)
+# PAT for pulling images from ghcr.io (never put this in config.toml).
+# Required scopes:
+#   read:packages   — pull images from GHCR
+#   write:packages  — push images to GHCR (containers --push)
+#   repo            — publish GitHub Releases (release --upload)
 export GHCR_PAT=<your-github-personal-access-token>
+
+# gh CLI must be authenticated for `gh release create/upload`.
+gh auth login
+```
+
+### Build container images
+
+The Apple chain (`xcode -> osx -> ios`) extracts SDKs from a host-supplied
+Xcode `.xip` placed at `containers/files/Xcode_<version>.xip`. The `.xip` is
+gitignored and never committed. Place it before running `containers --type
+xcode,osx,ios` (or `--type all`); the chain fails loud if it is missing.
+
+```bash
+# Build every image (base -> linux/windows/android/web/xcode/osx/ios) and push to GHCR.
+uv run python build-godot.py containers --type all --version 4.7 --push
 ```
 
 ### Build
 
+Builds are described as a **matrix** of `flavor × kind × mono × platform × arch`.
+You declare *what* to build and the tool derives the SCons invocations — you no
+longer hand-edit raw SCons flag strings.
+
 ```bash
-# Linux editor (Docker or local SCons fallback)
-uv run python build-godot.py build --platform linux --target editor
+# Linux Mono editor, release flavor, x86_64 only (Docker or local SCons fallback)
+uv run python build-godot.py build \
+  --platform linux --flavor release --kind editor --mono on --arch x86_64
 
-# Windows export templates (Docker required)
-uv run python build-godot.py build --platform windows --target templates
+# Full matrix for one platform (all flavors, both Mono + classical, all archs)
+uv run python build-godot.py build --platform linux --mono both
 
-# Multi-platform
-uv run python build-godot.py build --platform linux,android --target editor
+# Every platform, Mono + classical, three flavors, full arch matrix
+uv run python build-godot.py build --platform all --mono both
+
+# Preview the derived SCons commands without running anything
+uv run python build-godot.py build --platform all --mono both --dry-run
+```
+
+> macOS/iOS always build inside the `godot-osx` / `godot-ios` Docker images.
+> If the Apple toolchain is not set up (`containers/files/Xcode_<ver>.xip`
+> absent, or the `godot-osx` / `godot-ios` image was never built), the
+> Apple build path fails loud with an actionable error — there is no
+> silent skip and no auto-detection.
+
+### Release (local build → package → publish)
+
+The RAM-heavy SCons builds and the GitHub Release upload run **locally** on a
+beefy host. The default `scons -j` is `nproc - 2` (leave 2 cores for the
+system; floor of 1) — on a 16-core host that is `-j14`. CI only builds and
+pushes the Docker images.
+
+```bash
+export GHCR_PAT=<token>   # for image pulls + publish (repo scope)
+gh auth status            # gh must be authenticated for the release upload
+
+# One command: build the configured matrix, generate Mono glue once, package
+# editor zips + .tpz (classical + mono) + version.txt + SHA512-SUMS.txt, and
+# publish a real GitHub Release on tag 4.7-dev1 (prerelease).
+# Omit --jobs to use the nproc-2 default; pass it to override (e.g. lower for
+# RAM-heavy Mono passes).
+uv run python build-godot.py release --jobs 14
+```
+
+Resumable / partial runs:
+
+```bash
+# Re-publish without rebuilding (e.g. after a transient gh failure → exit 5)
+uv run python build-godot.py release --no-build --no-package --upload
+
+# Stop after producing artifacts (no publish)
+uv run python build-godot.py release --no-upload
 ```
 
 ---
@@ -87,12 +155,36 @@ uv run python build-godot.py build [OPTIONS]
 
 | Flag | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `--platform` | `str` (comma-separated) | **Yes** | — | Target platform(s): `linux`, `windows`, `android`, `web`. Multiple values are comma-separated, e.g. `linux,windows`. |
-| `--target` | `str` | No | `editor` | SCons build target: `editor`, `templates`, `template_debug`, `template_release`, or any raw SCons target string. |
+| `--platform` | `str` (comma-separated) | **Yes** | — | Target platform(s): `linux`, `windows`, `android`, `web`, `macos`, `ios`, or `all`. Multiple values are comma-separated, e.g. `linux,windows`. |
+| `--flavor` | `str` (comma-separated) | No | from `[build].flavors` | `release`, `debug`, `release_debug`. Replaces `--target` for flavor selection. |
+| `--kind` | `str` (comma-separated) | No | from `[build].kinds` | `editor`, `templates`. |
+| `--mono` | `str` | No | from `[build].mono` | `on`, `off`, or `both`. |
+| `--arch` | `str` (comma-separated) | No | from `[[platforms]].archs` | Restrict the arch matrix for a faster partial build. |
+| `--jobs` | `int` | No | `[build].build_jobs` (nproc - 2) | SCons `-j` parallelism. |
+| `--target` | `str` | No | _deprecated_ | Escape hatch: bypasses flavor/kind/mono derivation and is passed to SCons verbatim. |
 | `--godot-repo` | `str` | No | `nongvantinh/godot` | GitHub slug of the Godot source repo. Pass `official` or `godotengine/godot` to use upstream. When `upstream/godot/` is initialised, its pinned commit is used directly. |
 | `--config` | `path` | No | `./config.toml` | Path to the TOML configuration file. |
 | `--verbose` | flag | No | off | Enable DEBUG-level logging. |
-| `--dry-run` | flag | No | off | Print Docker commands without executing them. |
+| `--dry-run` | flag | No | off | Print Docker / SCons commands without executing them. |
+
+### `release` sub-command
+
+Drive the full build → package → publish flow.
+
+```
+uv run python build-godot.py release [OPTIONS]
+```
+
+| Flag | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `--config` | `path` | No | `./config.toml` | Path to the TOML configuration file. |
+| `--build` / `--no-build` | flag | No | `--build` | Run the SCons builds, or reuse existing `out/`. |
+| `--package` / `--no-package` | flag | No | `--package` | Run packaging, or reuse existing artifacts. |
+| `--upload` / `--no-upload` | flag | No | from `[release].auto_upload` | Run `gh release` upload, or stop after producing artifacts. |
+| `--tag` | `str` | No | `[release].tag` (`4.7-dev1`) | Target tag for the Release. |
+| `--jobs` | `int` | No | `[build].build_jobs` (nproc - 2) | SCons `-j` parallelism. |
+| `--godot-repo` | `str` | No | from config | GitHub slug of the Godot source repo. |
+| `--dry-run` | flag | No | off | Print the build/package/`gh` commands without executing them. |
 
 ### `containers` sub-command
 
@@ -105,9 +197,10 @@ uv run python build-godot.py containers [OPTIONS]
 
 | Flag | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `--type` | `str` (comma-separated) | **Yes** | — | Container type(s): `base`, `linux`, `windows`, `android`, `web`, or `all`. Multiple values are comma-separated. |
+| `--type` | `str` (comma-separated) | Yes (unless `--extract-sdks-only`) | — | Container type(s): `base`, `linux`, `windows`, `android`, `web`, `xcode`, `osx`, `ios`, or `all`. The Apple chain (`xcode` -> `osx` -> `ios`) needs `containers/files/Xcode_*.xip`. Multiple values are comma-separated. |
 | `--version` | `str` | No | `godot_version` from config | Image version tag, e.g. `4.7`. |
-| `--push` | flag | No | off | Push images to GHCR after building. Requires `GHCR_PAT` env var; skips gracefully when absent. |
+| `--push` | flag | No | off | Push images to GHCR after building. Requires `GHCR_PAT` env var; skips gracefully when absent. Mutually exclusive with `--extract-sdks-only`. |
+| `--extract-sdks-only` | flag | No | off | Skip image builds; only run the Apple SDK extraction step from `containers/files/Xcode_*.xip` (requires a built `godot-xcode:<version>` image). Useful for re-running extraction after a partial Apple build. |
 | `--config` | `path` | No | `./config.toml` | Path to the TOML configuration file. |
 | `--dry-run` | flag | No | off | Print Docker commands without executing them. |
 
@@ -149,11 +242,12 @@ uv run python build-godot.py containers --type all --version 4.7 --dry-run
 
 | Code | Meaning |
 |---|---|
-| `0` | Build completed successfully. |
+| `0` | Build completed successfully (including graceful Apple skips). |
 | `1` | Configuration error (missing key, bad value, missing env var). |
 | `2` | Platform not supported or container image not found in config. |
 | `3` | Docker unavailable and local fallback is not possible. |
-| `4` | Build subprocess exited with non-zero status. |
+| `4` | Build/package/upload subprocess exited with non-zero status. |
+| `5` | Release publish failed (`gh` auth missing, tag absent, asset conflict). Retriable with `release --no-build --no-package --upload`. |
 
 ### Example invocations
 
@@ -189,42 +283,212 @@ Copy `config.toml.example` to `config.toml` and fill in your values.
 registry = "ghcr.io"           # Container registry hostname
 username = "nongvantinh"       # Registry username (image path prefix)
 
-# Godot version string (used in SCons flags and image tags)
-godot_version = "4.3"
+# Godot source / version
+godot_version = "4.7"          # Used in SCons flags and image tags
+git_branch = "4.7.dev1"        # Branch/treeish of godot_repo to build
+godot_repo = "nongvantinh/godot"  # Fork slug (--godot-repo overrides)
+
+[build]                        # The build matrix (flavor x kind x mono x arch)
+flavors = ["release", "debug", "release_debug"]
+kinds = ["editor", "templates"]
+mono = ["on", "off"]           # ["on","off"] -> Mono + classical
+archs = ["x86_64", "x86_32", "arm64", "arm32"]  # Optional global arch filter
+# build_jobs = 14              # SCons -j (default nproc - 2; omit to track host)
+xcode_sdkv = "26.1.1"          # Xcode version the .xip ships
+apple_sdkv = "26.1"            # macOS SDK version (Xcode 26.1.1 -> 26.1)
 
 [scons]
 use_lto = false                # Link-time optimisation (increases build time)
 extra_flags = ""               # Raw SCons flags appended to every build
+accesskit_sdk_path = "/root/accesskit/accesskit-c"  # AccessKit C SDK path
+redirect_build_objects = true  # Emit redirect_build_objects=no (upstream align)
 
 [[platforms]]
 name = "linux"
-image = "ghcr.io/nongvantinh/linux-editor:4.3"
-scons_flags = "platform=linuxbsd"
+image = "ghcr.io/nongvantinh/godot-linux:4.7"
+scons_flags = "platform=linuxbsd"      # platform-invariant flags only
+archs = ["x86_64", "x86_32", "arm64", "arm32"]
+env_setup = "export PATH=$GODOT_SDK_LINUX_X86_64/bin:$BASE_PATH"
 
 [[platforms]]
 name = "windows"
-image = "ghcr.io/nongvantinh/windows:4.3"
-scons_flags = "platform=windows"
+image = "ghcr.io/nongvantinh/godot-windows:4.7"
+scons_flags = "platform=windows use_mingw=yes mingw_prefix=/root/llvm-mingw"
+archs = ["x86_64", "x86_32", "arm64"]
 
-[[platforms]]
-name = "android"
-image = "ghcr.io/nongvantinh/android:4.3"
-scons_flags = "platform=android"
+# ... android, web, macos, ios entries — see config.toml.example ...
 
-[[platforms]]
-name = "web"
-image = "ghcr.io/nongvantinh/web:4.3"
-scons_flags = "platform=web"
+[release]
+tag = "4.7-dev1"               # Existing tag the Release attaches to (no `v` prefix)
+repo = "nongvantinh/godot-build-scripts"
+auto_upload = true             # release sub-command runs gh release upload
+draft = false
+prerelease = true              # 4.7-dev1 is a dev build
 
 [signing]
-android_keystore = ""          # Path to Android keystore file (optional)
+android_keystore = ""          # Absolute path to Android keystore (optional; operator-supplied)
 android_key_alias = ""         # Android key alias (optional)
 # android_key_password — NEVER here; use ANDROID_KEY_PASSWORD env var
 ```
 
+> **Keystores MUST NOT be committed to this repo.** ``*.keystore`` is
+> ``.gitignore``d. The operator supplies their own keystore file via
+> ``[signing].android_keystore`` (an absolute path on the build host), the
+> alias via ``[signing].android_key_alias``, and the password via the
+> ``ANDROID_KEY_PASSWORD`` environment variable. See
+> [Android signing](#android-signing) for the full setup flow.
+
+### Key glossary
+
+Top-level:
+
+| Key | Type | Notes |
+|---|---|---|
+| `registry` | string | Container registry hostname (e.g. `ghcr.io`). |
+| `username` | string | Registry namespace; image path prefix. |
+| `godot_version` | string | Engine version string; threaded into SCons + image tags. |
+| `git_branch` | string | Branch/treeish of `godot_repo` to build. |
+| `godot_repo` | string | GitHub slug of the engine source repo. `--godot-repo` overrides. |
+
+`[build]`:
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `flavors` | list[string] | `["release","debug","release_debug"]` | Drives SCons `target=`/`production=` flags. |
+| `kinds` | list[string] | `["editor","templates"]` | Editor binary vs. export template build. |
+| `mono` | list[string] | `["on","off"]` | `["on","off"]` produces Mono + classical. |
+| `archs` | list[string] | platform-defined | Optional global arch filter; intersected with per-platform `archs`. |
+| `build_jobs` | int | `nproc - 2` | SCons `-j`; omit to track host. `--jobs` overrides. |
+| `xcode_sdkv` | string | — | Xcode version the host-supplied `.xip` ships. |
+| `apple_sdkv` | string | — | macOS SDK version inside that Xcode (e.g. `26.1` for Xcode 26.1.1). |
+
+`[scons]`:
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `use_lto` | bool | `false` | Link-time optimisation. |
+| `extra_flags` | string | `""` | Raw SCons flags appended verbatim to every build. |
+| `accesskit_sdk_path` | string | `/root/accesskit/accesskit-c` | In-container AccessKit C SDK path. |
+| `redirect_build_objects` | bool | `true` | Emit `redirect_build_objects=no` (matches upstream pinned toolchain). |
+
+`[[platforms]]` (one entry per platform):
+
+| Key | Type | Notes |
+|---|---|---|
+| `name` | string | Platform identifier (`linux`, `windows`, `android`, `web`, `macos`, `ios`). |
+| `image` | string | Full container image reference. |
+| `scons_flags` | string | Platform-INVARIANT flags only; arch/target/Mono/flavor are derived. |
+| `archs` | list[string] | Architectures supported by this platform. |
+| `env_setup` | string | Optional shell snippet sourced before SCons (e.g. emsdk activation). |
+
+`[release]`:
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `tag` | string | — | Existing git tag the Release attaches to (e.g. `4.7-dev1`; matches the live tag — no `v` prefix). |
+| `repo` | string | — | Repo slug to publish under (`owner/repo`). |
+| `auto_upload` | bool | `true` | `release` sub-command runs `gh release create/upload`. |
+| `draft` | bool | `false` | Publish as a draft Release. |
+| `prerelease` | bool | `true` | Flag the Release as a prerelease (default for dev builds). |
+
+> `scons_flags` per `[[platforms]]` now carries only **platform-invariant**
+> flags. `arch`, `target`, Mono toggles, and flavor flags are derived from the
+> `[build]` matrix and the per-platform `archs`.
+
 **Secrets policy:** `GHCR_PAT` must be set as an environment variable — never
-as a key in `config.toml`. The tool will exit with code 1 if it detects a
-`ghcr_pat` or `token` key in the config file.
+as a key in `config.toml`. `gh` authentication for publishing Releases also
+lives in the environment. The tool will exit with code 1 if it detects a
+`ghcr_pat` or `token` key anywhere in the config tree (including the new
+`[build]` / `[release]` tables).
+
+---
+
+## Android signing
+
+Android editor/template builds can be signed with an operator-supplied
+keystore. **The build system never commits a keystore.** The previous
+`data/godot-release.keystore` blob has been removed from the working tree
+and `*.keystore` is now in `.gitignore`.
+
+### Creating a keystore
+
+```bash
+keytool -genkeypair \
+    -keystore /absolute/path/to/godot.keystore \
+    -alias <your-alias> \
+    -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Keep this file off the repo. A common convention is to drop it under
+`deps/keystore/` (which is gitignored as it lives under the build's deps
+output), but any absolute path on the build host works.
+
+### Wiring it into `config.toml`
+
+```toml
+[signing]
+android_keystore = "/absolute/path/to/godot.keystore"
+android_key_alias = "<your-alias>"
+# android_key_password — NEVER in config.toml; use the env var below.
+```
+
+```bash
+export ANDROID_KEY_PASSWORD=<your-keystore-password>
+```
+
+`build-godot.py` reads `ANDROID_KEY_PASSWORD` from the environment and
+plumbs the keystore/alias into the Android build. If
+`GODOT_ANDROID_SIGN_KEYSTORE` is set instead (legacy path), the host
+orchestrator stages that file into `deps/keystore/` for the Android
+container at build time.
+
+### What MUST NOT be done
+
+- **Never** commit a `.keystore` file (or any other signing material) to
+  this repo. `.gitignore` enforces this at the working-tree level.
+- **Never** add `android_key_password`, `ghcr_pat`, or any other secret
+  key to `config.toml`. `build-godot.py` exits with code 1 if it detects
+  one. Passwords/tokens live exclusively in environment variables.
+
+If you previously cloned a revision that contained
+`data/godot-release.keystore`, the file remains in git history. Rotating
+the signing key on the Play Store / app distribution side is the
+recommended mitigation regardless of any later history-rewrite
+(`git filter-repo`) operation the operator may decide to plan separately.
+
+---
+
+## Resumability
+
+The orchestrator skips a platform when its `out/<platform>/` directory is
+already non-empty. This makes failed-mid-matrix re-runs cheap: only the
+platforms that have not yet produced artifacts will be rebuilt.
+
+To force a single platform to rebuild:
+
+```bash
+rm -rf out/<platform>/
+uv run python build-godot.py release --jobs 14
+```
+
+The same gate applies to the Mono glue step: `mono-glue/` non-empty -> skip
+glue regeneration, reuse the cached glue. Delete `mono-glue/` to force.
+
+---
+
+## Known limitations
+
+- **Windows arm64 (best-effort)** — the prebuilt ANGLE arm64-LLVM bundle has
+  a libc++ symbol clash with the MinGW toolchain we use. The build script
+  marks the arm64 SCons pass as best-effort; releases ship only Windows
+  x86_64 / x86_32 binaries until ANGLE publishes a rebuild without embedded
+  libc++ symbols.
+- **Web + Mono** — upstream Godot rejects `module_mono_enabled=yes` on the
+  web platform (`modules/mono/config.py:14`). The build script honours the
+  upstream gate and skips the web Mono pass; only the classical web editor
+  is built.
+- **Android editor APK/AAB** — only the `.aar` template library is wired up.
+  The full editor APK/AAB build path is deferred to a follow-up ticket.
 
 ---
 
@@ -233,25 +497,38 @@ as a key in `config.toml`. The tool will exit with code 1 if it detects a
 After `git submodule update --init --recursive`, three repos are populated
 under `upstream/`:
 
-| Path | Remote | Purpose |
+| Path | Remote | Role |
 |---|---|---|
-| `upstream/godot-build-scripts/` | `godotengine/godot-build-scripts` | Official SCons helper scripts (full history) |
-| `upstream/build-containers/` | `godotengine/build-containers` | Official Dockerfiles (full history) |
-| `upstream/godot/` | `nongvantinh/godot` | Custom Godot fork — default build source |
+| `upstream/godot-build-scripts/` | `godotengine/godot-build-scripts` | **Upstream-tracking.** Reference copy of upstream tooling. Read-only; not invoked. |
+| `upstream/build-containers/` | `godotengine/build-containers` | **Upstream-tracking.** Reference copy of the official Dockerfiles. Read-only. |
+| `upstream/godot/` | `nongvantinh/godot` | **Fork integration point.** The Godot engine source this Release builds. Engine-side fixes land here. |
 
-### Updating submodules to latest upstream
+### Submodule discipline
+
+- The two upstream-tracking submodules
+  (`upstream/godot-build-scripts` and `upstream/build-containers`) are kept
+  in the tree purely as a reference for cherry-picking upstream changes.
+  They are **not** invoked by the build path.
+- `upstream/godot` is the **only** submodule that influences a Release. Its
+  pointer is the engine source `build-godot.py` checks out and builds.
+- **Never auto-repin** any of these three. Bumping a submodule pointer is an
+  explicit operator action — it carries a Release-content change and goes
+  through a normal PR. Tooling that pre-fetches submodules must not commit
+  the resulting pointer drift.
+
+### Updating submodules
 
 ```bash
-# Update all submodules to the latest commit on their tracking branch
-git submodule update --remote --merge
-
-# Update a single submodule
-git -C upstream/godot pull origin main
-
-# Commit the updated submodule pointer
+# Bump upstream/godot to the latest fork commit (explicit operator action).
+git -C upstream/godot fetch origin
+git -C upstream/godot checkout <commit>
 git add upstream/godot
-git commit -m "chore(upstream): bump godot submodule to latest"
+git commit -m "chore(upstream): bump godot submodule to <commit>"
 ```
+
+For the two upstream-tracking submodules the same flow applies; both should
+be bumped only when there is a concrete reason (e.g. cherry-picking an
+upstream fix).
 
 ---
 
@@ -269,29 +546,6 @@ patches/
 
 Patches are applied to the Godot source in `upstream/godot/`. If `patches/`
 is empty or contains no `*.patch` files, the step is a no-op.
-
----
-
-## `config.sh` → `config.toml` Migration
-
-| Old key (`config.sh`) | New key (`config.toml`) | Notes |
-|---|---|---|
-| `REGISTRY` | `registry` | Top-level string |
-| `USERNAME` | `username` | Top-level string |
-| `GODOT_VERSION` | `godot_version` | Top-level string |
-| `USE_LTO` | `scons.use_lto` | Boolean under `[scons]` |
-| `EXTRA_FLAGS` | `scons.extra_flags` | String under `[scons]` |
-| `LINUX_IMAGE` | `platforms[name="linux"].image` | Under `[[platforms]]` |
-| `WINDOWS_IMAGE` | `platforms[name="windows"].image` | Under `[[platforms]]` |
-| `ANDROID_IMAGE` | `platforms[name="android"].image` | Under `[[platforms]]` |
-| `WEB_IMAGE` | `platforms[name="web"].image` | Under `[[platforms]]` |
-| `GHCR_PAT` / `PAT_TOKEN` | **env var only** — `GHCR_PAT` | Never in `config.toml` |
-
-Replace any invocations of `sudo bash main.sh godot` with:
-
-```bash
-uv run python build-godot.py build --platform <target> --target editor
-```
 
 ---
 
@@ -342,11 +596,14 @@ ERROR: Docker daemon is not running (docker info exited with 1).
 ### `Platform 'X' not supported`
 
 ```
-ERROR: Platform 'macos' is not supported.
+ERROR: Platform 'foobar' is not supported.
 ```
 
-Currently supported platforms: `linux`, `windows`, `android`, `web`.  
-macOS cross-compilation is not supported without an Xcode host.
+Supported platforms: `linux`, `windows`, `android`, `web`, `macos`, `ios`
+(and `all`). macOS/iOS build inside the `godot-osx` / `godot-ios` images
+and always attempt to build; if the Apple toolchain is not set up
+(`containers/files/Xcode_<ver>.xip` absent, or the images were never
+built), the Apple build path fails loud with an actionable error.
 
 ### `No [[platforms]] entry found for 'X'`
 
@@ -362,3 +619,37 @@ name = "android"
 image = "ghcr.io/nongvantinh/android:4.3"
 scons_flags = "platform=android"
 ```
+
+### Apple SDK extraction failed
+
+If `godot-osx` / `godot-ios` build fail with a missing `MacOSX*.sdk.tar.xz`
+or `iPhoneOS*.sdk.tar.xz`, the SDK extraction step did not produce the
+tarballs in `containers/files/`. Re-run extraction manually:
+
+```bash
+docker run --rm \
+  -v "$(pwd)/containers/files:/root/files" \
+  godot-xcode:<version> \
+  /root/files/extract_xcode_sdks.sh
+```
+
+Confirm `containers/files/Xcode_<version>.xip` exists and matches
+`[build].xcode_sdkv`. Then re-run the build with `--extract-sdks-only`:
+
+```bash
+uv run python build-godot.py containers --extract-sdks-only --version 4.7
+```
+
+### Resumability false-skip
+
+If the orchestrator skips a platform you expected to rebuild, the
+resumability gate sees a non-empty `out/<platform>/`. Delete it to force a
+rebuild:
+
+```bash
+rm -rf out/<platform>/
+uv run python build-godot.py release --jobs 14
+```
+
+The same applies to `mono-glue/` — delete it to force Mono glue
+regeneration before the next Mono build.

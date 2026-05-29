@@ -2,35 +2,79 @@ ARG IMAGE_VERSION=latest
 FROM godot-fedora:${IMAGE_VERSION}
 
 ARG IMAGE_VERSION
-ARG REPO_URL="https://github.com/nongvantinh/godot-engine-custom-builds"
+ARG REPO_URL="https://github.com/nongvantinh/godot-build-scripts"
 
 LABEL "org.opencontainers.image.source"="$REPO_URL"
 
-# Copy the necessary files into the image
+# Copy the necessary files into the image (extracted SDK tarballs + helpers).
 COPY files /root/files
 
-ENV OSX_SDK=15.2
+# Xcode 26.1.1 ships the macOS 26.1 SDK. Parameterised at image-build time:
+# build-godot.py's container_builder passes --build-arg XCODE_SDKV / APPLE_SDKV
+# from [build].xcode_sdkv / [build].apple_sdkv. The defaults below keep a
+# standalone `docker build` working without build-args.
+ARG XCODE_SDKV
+ARG APPLE_SDKV
+ENV XCODE_SDKV=${XCODE_SDKV:-26.1.1}
+ENV APPLE_SDKV=${APPLE_SDKV:-26.1}
 
 RUN dnf -y install --setopt=install_weak_deps=False \
-      automake autoconf bzip2-devel cmake gcc gcc-c++ libdispatch libicu-devel libtool \
-      libxml2-devel openssl-devel uuid-devel yasm && \
+      automake autoconf bzip2-devel cmake gawk gcc gcc-c++ libdispatch libicu-devel libtool \
+      libxml2-devel openssl-devel uuid-devel yasm gpg && \
     git clone --progress https://github.com/tpoechtrager/osxcross && \
     cd /root/osxcross && \
-    git checkout 29fe6dd35522073c9df5800f8cd1feb4b9a993a8 && \
-    curl -LO https://github.com/tpoechtrager/osxcross/pull/441.patch && \
-    git apply 441.patch && \
-    ln -s /root/files/MacOSX${OSX_SDK}.sdk.tar.xz /root/osxcross/tarballs && \
+    git checkout 121ce150c7857a9474dfff8a8e431482806b3e1b && \
+    # Patch to fix visionOS support.
+    # See: https://github.com/llvm/llvm-project/issues/142502
+    patch -p1 < /root/files/patches/osxcross-fix-visionos.patch && \
+    ln -s /root/files/MacOSX${APPLE_SDKV}.sdk.tar.xz /root/osxcross/tarballs && \
     export UNATTENDED=1 && \
-    export SDK_VERSION=${OSX_SDK} && \
+    export SDK_VERSION=${APPLE_SDKV} && \
     # Custom build Apple Clang to ensure compatibility.
     # Find the equivalent LLVM version for the SDK from:
     # https://en.wikipedia.org/wiki/Xcode#Toolchain_versions
-    CLANG_VERSION=17.0.6 ENABLE_CLANG_INSTALL=1 INSTALLPREFIX=/usr ./build_apple_clang.sh && \
+    CLANG_VERSION=19.1.5 ENABLE_CLANG_INSTALL=1 INSTALLPREFIX=/usr ./build_apple_clang.sh && \
     ./build.sh && \
     ./build_compiler_rt.sh && \
     rm -rf /root/osxcross/build
 
 ENV OSXCROSS_ROOT=/root/osxcross
 ENV PATH="/root/osxcross/target/bin:${PATH}"
+
+# Unpack the Xcode Developer tree (ships the iOS/tvOS/visionOS SDKs) so the
+# ios image and scripts/in_container/build_ios.py can read them from /root/Xcode.app.
+RUN mkdir -p /root/Xcode.app/Contents/Developer
+RUN cd /root/Xcode.app/Contents/Developer && tar xf /root/files/Xcode-Developer${XCODE_SDKV}.tar.xz --strip-components=1
+
+# GPG-verified swiftly bootstrap + Swift 6.2.1 pre-install + keystore lock
+# cleanup. The Swift project signing keys are imported into /root/.gnupg/ and
+# preserved in the final image layer; swiftly + Swift 6.2.1 are downloaded
+# and PGP-verified against those keys before any binary runs. Swift 6.2.1
+# (the version build_ios.py / build_macos.py default to) is pre-installed at
+# image-build time so the runtime swiftly_install call short-circuits. The
+# gpgconf + lock-file cleanup blocks remove stale BuildKit-sandbox gpg-agent
+# sockets that otherwise cause gpg --import to time out at runtime. The
+# `set -euo pipefail` + `&&` chaining + `bash -c` wrapper are the load-bearing
+# integrity controls (pipefail makes the `curl | gpg --import` step fail the
+# image build if any link breaks).
+RUN bash -c 'set -euo pipefail; \
+    arch="$(uname -m)"; \
+    base="https://download.swift.org/swiftly/linux"; \
+    curl -fSsL -O "${base}/swiftly-${arch}.tar.gz"; \
+    curl -fSsL -O "${base}/swiftly-${arch}.tar.gz.sig"; \
+    curl -fSsL https://swift.org/keys/all-keys.asc | gpg --import -; \
+    gpg --verify "swiftly-${arch}.tar.gz.sig" "swiftly-${arch}.tar.gz"; \
+    tar zxf "swiftly-${arch}.tar.gz"; \
+    ./swiftly init --platform ubi9 --quiet-shell-followup -y; \
+    . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"; \
+    hash -r; \
+    gpgconf --kill all || true; \
+    find /root/.gnupg -type f \( -name "*.lock" -o -name ".#lk*" -o -name "S.*" \) -delete || true; \
+    "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/bin/swiftly" install \
+        --assume-yes --post-install-file=/dev/null 6.2.1; \
+    gpgconf --kill all || true; \
+    find /root/.gnupg -type f \( -name "*.lock" -o -name ".#lk*" -o -name "S.*" \) -delete || true'
+
+RUN /root/files/swift/create-sdk-bundle.sh /root/Xcode.app/Contents/Developer /root/.swiftpm/swift-sdks
 
 CMD ["/bin/bash"]

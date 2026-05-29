@@ -1,13 +1,17 @@
+# This image extracts the macOS SDK + the Xcode Developer tree from the
+# operator-provided Xcode_${XCODE_SDKV}.xip via extract_xcode_sdks.sh, writing
+# the resulting tarballs into /root/files (bind-mounted to containers/files at
+# build time). The osx/ios images then consume those tarballs.
 ARG IMAGE_VERSION=latest
 
 FROM godot-fedora:${IMAGE_VERSION}
 
 ARG IMAGE_VERSION
-ARG REPO_URL="https://github.com/nongvantinh/godot-engine-custom-builds"
+ARG REPO_URL="https://github.com/nongvantinh/godot-build-scripts"
 
 LABEL "org.opencontainers.image.source"="$REPO_URL"
 
-# Copy the necessary files into the image
+# Copy the necessary files into the image (the xip + extract_xcode_sdks.sh).
 COPY files /root/files
 
 RUN dnf -y install --setopt=install_weak_deps=False \
@@ -17,28 +21,18 @@ RUN dnf -y install --setopt=install_weak_deps=False \
     git checkout bf536e167f2e514866f91d7baa0df1dff5a13711 && \
     clang -O3 -llzma -lxar -I /usr/local/include pbzx.c -o pbzx
 
-ENV XCODE_SDKV=
-ENV OSX_SDKV=
-ENV IOS_SDKV=
+# Xcode 26.1.1 ships the macOS 26.1 SDK. Parameterised at image-build time:
+# build-godot.py's container_builder passes --build-arg XCODE_SDKV / APPLE_SDKV
+# from [build].xcode_sdkv / [build].apple_sdkv so the version strings are not
+# hand-edited per Xcode bump. The defaults below keep a standalone
+# `docker build` working when the build-args are omitted.
+ARG XCODE_SDKV
+ARG APPLE_SDKV
+ENV XCODE_SDKV=${XCODE_SDKV:-26.1.1}
+ENV APPLE_SDKV=${APPLE_SDKV:-26.1}
 
-CMD ["/bin/bash", "-c", "mkdir -p /root/xcode && \
-    cd /root/xcode && \
-    xar -xf /root/files/Xcode_${XCODE_SDKV}.xip && \
-    /root/pbzx/pbzx -n Content | cpio -i && \
-    export OSX_SDK=MacOSX${OSX_SDKV}.sdk && \
-    cp -r Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk /tmp/${OSX_SDK} && \
-    cd /tmp && \
-    tar -cJf /root/files/${OSX_SDK}.tar.xz ${OSX_SDK} && \
-    rm -rf ${OSX_SDK} && \
-    cd /root/xcode && \
-    export IOS_SDK=iPhoneOS${IOS_SDKV}.sdk && \
-    export IOS_SIMULATOR_SDK=iPhoneSimulator${IOS_SDKV}.sdk && \
-    cp -r Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk /tmp/${IOS_SDK} && \
-    cd /tmp && \
-    tar -cJf /root/files/${IOS_SDK}.tar.xz ${IOS_SDK} && \
-    rm -rf ${IOS_SDK} && \
-    cd /root/xcode && \
-    cp -r Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk /tmp/${IOS_SIMULATOR_SDK} && \
-    cd /tmp && \
-    tar -cJf /root/files/${IOS_SIMULATOR_SDK}.tar.xz ${IOS_SIMULATOR_SDK} && \
-    rm -rf ${IOS_SIMULATOR_SDK}"]
+# extract_xcode_sdks.sh unpacks Xcode_${XCODE_SDKV}.xip and packs
+# MacOSX${APPLE_SDKV}.sdk.tar.xz + Xcode-Developer${XCODE_SDKV}.tar.xz into
+# /root/files. The iPhoneOS SDK is shipped inside the Developer tree, so it is
+# not packed separately (matches upstream).
+CMD ["/root/files/extract_xcode_sdks.sh"]
