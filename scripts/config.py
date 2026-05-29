@@ -75,7 +75,6 @@ DEFAULT_REDIRECT_BUILD_OBJECTS = False
 # Defaults for the [release] table (Phase D).
 # ---------------------------------------------------------------------------
 
-DEFAULT_RELEASE_TAG = "v4.7-dev1"
 DEFAULT_RELEASE_REPO = "nongvantinh/godot-build-scripts"
 DEFAULT_RELEASE_AUTO_UPLOAD = True
 DEFAULT_RELEASE_DRAFT = False
@@ -242,9 +241,16 @@ def _check_release_section(config: dict, path: str) -> None:
     if not isinstance(release, dict):
         raise ConfigError(f"[release] in {path} must be a table.")
 
-    for key in ("tag", "repo"):
-        if key in release and not isinstance(release[key], str):
-            raise ConfigError(f"[release].{key} in {path} must be a string.")
+    if "tag" in release:
+        raise ConfigError(
+            f"[release].tag in {path} is not configurable: the release tag is "
+            f"derived from upstream/godot/version.py (e.g. '4.7.beta') so it "
+            f"cannot drift from the engine binary. Remove this key from your "
+            f"config.toml. Use the `--tag` CLI flag on the release sub-command "
+            f"for one-off hotfix overrides."
+        )
+    if "repo" in release and not isinstance(release["repo"], str):
+        raise ConfigError(f"[release].repo in {path} must be a string.")
     for key in ("auto_upload", "draft", "prerelease"):
         if key in release and not isinstance(release[key], bool):
             raise ConfigError(f"[release].{key} in {path} must be a boolean.")
@@ -307,8 +313,11 @@ def get_scons_config(config: dict) -> dict:
 def get_release_config(config: dict) -> dict:
     """Return the [release] table with defaults applied for any missing key."""
     release = config.get("release", {}) or {}
+    # NOTE: no ``tag`` key — the release tag is derived from
+    # ``upstream/godot/version.py`` in ``build-godot.py::cmd_release`` so it
+    # cannot drift from what the engine binary reports. ``--tag`` on the
+    # release sub-command remains available as a one-off override.
     return {
-        "tag": release.get("tag", DEFAULT_RELEASE_TAG),
         "repo": release.get("repo", DEFAULT_RELEASE_REPO),
         "auto_upload": release.get("auto_upload", DEFAULT_RELEASE_AUTO_UPLOAD),
         "draft": release.get("draft", DEFAULT_RELEASE_DRAFT),

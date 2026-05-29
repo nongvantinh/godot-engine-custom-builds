@@ -89,8 +89,16 @@ def package_release(
     """
     del build_cfg  # accepted for forward compatibility; unused today.
 
-    binaries_version = f"{godot_version}-{godot_version_status}"
-    templates_version = f"{godot_version}.{godot_version_status}"
+    # Single source of truth — ``<godot_version>.<godot_version_status>`` (e.g.
+    # ``4.7.beta``) comes from upstream/godot/version.py and drives BOTH the
+    # published filename pattern AND ``version.txt`` inside the .tpz. Godot
+    # looks templates up by ``version.txt`` at install time, so the install
+    # path on the user's machine matches the engine binary's reported version
+    # exactly. Diverging filenames from the engine version was the historical
+    # source of "templates installed at 4.7.dev1 but engine reports 4.7.beta"
+    # bugs — this layout makes the mismatch impossible.
+    binaries_version = f"{godot_version}.{godot_version_status}"
+    templates_version = binaries_version
     godot_basename = f"Godot_v{binaries_version}"
 
     out_dir = basedir / "out"

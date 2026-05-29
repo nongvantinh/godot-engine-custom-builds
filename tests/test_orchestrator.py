@@ -192,17 +192,17 @@ class TestCollectReleaseAssets:
         assert collect_release_assets(tmp_path / "nope") == []
 
     def test_collects_files_including_mono_subdir(self, tmp_path):
-        (tmp_path / "Godot_v4.7-dev1_linux.x86_64.zip").write_text("x")
+        (tmp_path / "Godot_v4.7.dev1_linux.x86_64.zip").write_text("x")
         (tmp_path / "SHA512-SUMS.txt").write_text("x")
         mono = tmp_path / "mono"
         mono.mkdir()
-        (mono / "Godot_v4.7-dev1_mono_export_templates.tpz").write_text("x")
+        (mono / "Godot_v4.7.dev1_mono_export_templates.tpz").write_text("x")
 
         assets = collect_release_assets(tmp_path)
 
         names = {p.name for p in assets}
-        assert "Godot_v4.7-dev1_linux.x86_64.zip" in names
-        assert "Godot_v4.7-dev1_mono_export_templates.tpz" in names
+        assert "Godot_v4.7.dev1_linux.x86_64.zip" in names
+        assert "Godot_v4.7.dev1_mono_export_templates.tpz" in names
         assert "SHA512-SUMS.txt" in names
 
 
@@ -214,7 +214,7 @@ class TestCollectReleaseAssets:
 class TestBuildPublishCommand:
     def test_uses_create_with_prerelease_when_release_does_not_exist(self):
         cmd = build_publish_command(
-            tag="v4.7-dev1",
+            tag="v4.7.dev1",
             repo="nongvantinh/godot-build-scripts",
             assets=["/tmp/a.zip"],
             prerelease=True,
@@ -223,14 +223,14 @@ class TestBuildPublishCommand:
         )
 
         assert cmd[:3] == ["gh", "release", "create"]
-        assert "v4.7-dev1" in cmd
+        assert "v4.7.dev1" in cmd
         assert "--prerelease" in cmd
         # `--clobber` is an `upload`-only flag; `gh release create` rejects it.
         assert "--clobber" not in cmd
 
     def test_uses_upload_with_clobber_when_release_exists(self):
         cmd = build_publish_command(
-            tag="v4.7-dev1",
+            tag="v4.7.dev1",
             repo="nongvantinh/godot-build-scripts",
             assets=["/tmp/a.zip"],
             prerelease=True,
@@ -244,7 +244,7 @@ class TestBuildPublishCommand:
 
     def test_includes_draft_flag_when_draft_requested(self):
         cmd = build_publish_command(
-            tag="v4.7-dev1",
+            tag="v4.7.dev1",
             repo="r/r",
             assets=["/tmp/a.zip"],
             prerelease=False,
@@ -266,7 +266,7 @@ class TestPublishRelease:
         asset.write_text("x")
         with mock.patch("scripts.orchestrator.subprocess.run") as run:
             publish_release(
-                tag="v4.7-dev1",
+                tag="v4.7.dev1",
                 repo="r/r",
                 assets=[asset],
                 prerelease=True,
@@ -280,7 +280,7 @@ class TestPublishRelease:
         with mock.patch("scripts.orchestrator._gh_available", return_value=True):
             with pytest.raises(PublishError, match="No release assets"):
                 publish_release(
-                    tag="v4.7-dev1",
+                    tag="v4.7.dev1",
                     repo="r/r",
                     assets=[],
                     prerelease=True,
@@ -294,7 +294,7 @@ class TestPublishRelease:
         with mock.patch("scripts.orchestrator._gh_available", return_value=False):
             with pytest.raises(PublishError, match="gh CLI not found"):
                 publish_release(
-                    tag="v4.7-dev1",
+                    tag="v4.7.dev1",
                     repo="r/r",
                     assets=[asset],
                     prerelease=True,
@@ -315,7 +315,7 @@ class TestPublishRelease:
         ):
             with pytest.raises(PublishError, match="gh release"):
                 publish_release(
-                    tag="v4.7-dev1",
+                    tag="v4.7.dev1",
                     repo="r/r",
                     assets=[asset],
                     prerelease=True,
@@ -333,7 +333,7 @@ class TestPublishRelease:
         ):
             run.return_value = subprocess.CompletedProcess([], 0)
             publish_release(
-                tag="v4.7-dev1",
+                tag="v4.7.dev1",
                 repo="r/r",
                 assets=[asset],
                 prerelease=True,

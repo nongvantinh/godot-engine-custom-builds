@@ -27,8 +27,12 @@ from scripts import packager
 
 _GODOT_VERSION = "4.7"
 _STATUS = "dev1"
-_BINARIES_VERSION = f"{_GODOT_VERSION}-{_STATUS}"
-_TEMPLATES_VERSION = f"{_GODOT_VERSION}.{_STATUS}"
+# Single source of truth — filenames and templates_version both use the
+# dot-joined `<version>.<status>` form (e.g. "4.7.dev1") so the install path
+# Godot derives from `version.txt` matches the engine binary's reported
+# version exactly. The hyphen-joined `4.7-dev1` form is no longer produced.
+_BINARIES_VERSION = f"{_GODOT_VERSION}.{_STATUS}"
+_TEMPLATES_VERSION = _BINARIES_VERSION
 _GODOT_BASENAME = f"Godot_v{_BINARIES_VERSION}"
 
 

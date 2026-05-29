@@ -607,7 +607,10 @@ class TestReleaseSection:
 
         release = get_release_config(cfg)
 
-        assert release["tag"] == "v4.7-dev1"
+        # No "tag" key — release tag is derived from upstream/godot/version.py
+        # in build-godot.py::cmd_release. The config can't override it (only
+        # the --tag CLI flag can, for one-off hotfix overrides).
+        assert "tag" not in release
         assert release["repo"] == "nongvantinh/godot-build-scripts"
         assert release["auto_upload"] is True
         assert release["prerelease"] is True
@@ -618,7 +621,6 @@ class TestReleaseSection:
         _write_toml(
             toml_file,
             _MINIMAL_VALID_TOML + "\n[release]\n"
-            'tag = "v9.9-test"\n'
             'repo = "owner/repo"\n'
             "auto_upload = false\n"
             "prerelease = false\n",
@@ -627,19 +629,21 @@ class TestReleaseSection:
 
         release = get_release_config(cfg)
 
-        assert release["tag"] == "v9.9-test"
+        assert "tag" not in release
         assert release["repo"] == "owner/repo"
         assert release["auto_upload"] is False
         assert release["prerelease"] is False
 
-    def test_raises_when_release_tag_not_a_string(self, tmp_path):
+    def test_raises_when_tag_key_set_in_config(self, tmp_path):
+        # The tag is derived from version.py and MUST NOT be set in config —
+        # historic source of engine/template version drift.
         toml_file = tmp_path / "config.toml"
         _write_toml(
             toml_file,
-            _MINIMAL_VALID_TOML + "\n[release]\ntag = 47\n",
+            _MINIMAL_VALID_TOML + '\n[release]\ntag = "4.7.beta"\n',
         )
 
-        with pytest.raises(ConfigError, match="tag"):
+        with pytest.raises(ConfigError, match="not configurable"):
             load_config(str(toml_file))
 
 
