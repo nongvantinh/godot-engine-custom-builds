@@ -162,9 +162,11 @@ archs = ["arm64"]
 # ---------------------------------------------------------------------------
 
 [release]
-# Existing git tag to attach the Release assets to. The live tag has NO ``v``
-# prefix (matches the upstream Godot convention: ``4.7-dev1``, not ``v4.7-dev1``).
-tag = "4.7-dev1"
+# NOTE: no ``tag`` key here. The release tag is DERIVED from
+# ``upstream/godot/version.py`` (e.g. ``4.7.beta``) so it cannot drift from
+# what the engine binary reports at runtime. Adding ``tag = ...`` is rejected
+# with a clear error; for a one-off hotfix override, use the ``--tag`` CLI
+# flag on the ``release`` sub-command.
 
 # Repository the Release is published on.
 repo = "nongvantinh/godot-build-scripts"
@@ -173,7 +175,8 @@ repo = "nongvantinh/godot-build-scripts"
 # When false, it stops after producing artifacts for a manual upload.
 auto_upload = true
 
-# Release flags. 4.7-dev1 is a dev build, so prerelease=true.
+# Release flags. Pre-release builds (anything before a `stable` status in
+# version.py) keep prerelease=true.
 draft = false
 prerelease = true
 

@@ -58,6 +58,7 @@ from scripts.docker_helper import (
     pull_image,
     run_build,
 )
+from scripts.host_orchestrator import _read_version
 from scripts.orchestrator import (
     PublishError,
     collect_release_assets,
@@ -778,7 +779,14 @@ def cmd_release(args: argparse.Namespace) -> int:
     release_cfg = get_release_config(config)
 
     num_cores = args.jobs if args.jobs is not None else build_cfg["build_jobs"]
-    tag = args.tag if args.tag is not None else release_cfg["tag"]
+    # Engine version drives the release tag — no separate config knob, so the
+    # tag cannot drift from what the engine binary reports. ``--tag`` is the
+    # one-off override (e.g. for hotfix re-publishes).
+    _engine_version, _engine_status_for_tag = _read_version(
+        _BUILD_AND_TEMPLATES_DIR.parent / "upstream" / "godot"
+    )
+    default_tag = f"{_engine_version}.{_engine_status_for_tag}"
+    tag = args.tag if args.tag is not None else default_tag
     repo = release_cfg["repo"]
     do_upload = (
         args.do_upload if args.do_upload is not None else release_cfg["auto_upload"]
@@ -821,9 +829,14 @@ def cmd_release(args: argparse.Namespace) -> int:
     else:
         logger.info("Skipping build step (--no-build).")
 
-    # Status suffix derives from the configured branch tail (e.g. 4.7.dev1 -> dev1).
-    status = git_branch.split(".")[-1] if "." in git_branch else git_branch
-    binaries_version = f"{godot_version}-{status}"
+    # Single source of truth: upstream/godot/version.py drives both the engine
+    # binary's reported version AND every release artifact name. This is what
+    # Godot writes into `version.txt` inside the .tpz and looks up at install
+    # time, so any divergence between the binary and the templates breaks the
+    # template lookup. The release tag, the published filenames, the release
+    # staging directory — all use `<version>.<status>` (e.g. `4.7.beta`).
+    _, engine_status = _read_version(_BUILD_AND_TEMPLATES_DIR.parent / "upstream" / "godot")
+    binaries_version = f"{godot_version}.{engine_status}"
 
     # --- Package (scripts.packager: editor zips + .tpz + SHA512-SUMS.txt) ---
     if args.do_package:
@@ -831,7 +844,7 @@ def cmd_release(args: argparse.Namespace) -> int:
         rc = package_release(
             build_dir=_BUILD_AND_TEMPLATES_DIR,
             godot_version=godot_version,
-            godot_version_status=status,
+            godot_version_status=engine_status,
             dry_run=args.dry_run,
         )
         if rc != 0:

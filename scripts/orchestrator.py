@@ -103,8 +103,15 @@ def package_release(
     build_dir
         ``build-godot-and-templates/`` — the dir holding ``out/`` /
         ``releases/`` / ``deps/`` etc.
-    godot_version, godot_version_status
-        Engine version + pre-release status, e.g. ``"4.7"`` / ``"dev1"``.
+    godot_version
+        Engine version (``major.minor[.patch]``), e.g. ``"4.7"``.
+    godot_version_status
+        Engine pre-release status from ``upstream/godot/version.py``, e.g.
+        ``"beta"``. This is the SINGLE source of truth: it drives both the
+        published filename pattern (``Godot_v<godot_version>.<status>_*``)
+        AND ``version.txt`` inside the ``.tpz``. Godot looks templates up
+        by ``version.txt`` at install time, so this MUST match what the
+        engine binary reports at runtime.
     upstream_godot_dir
         Optional override for the path to the checked-out Godot source. When
         ``None`` (the default), the packager picks
