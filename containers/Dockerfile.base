@@ -1,6 +1,6 @@
 FROM fedora:43
 
-ARG REPO_URL="https://github.com/nongvantinh/godot-engine-custom-builds"
+ARG REPO_URL="https://github.com/nongvantinh/godot-build-scripts"
 
 LABEL "org.opencontainers.image.source"="$REPO_URL"
 

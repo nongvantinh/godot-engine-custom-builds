@@ -4,6 +4,12 @@
 # Copy config.toml.example to config.toml to get started.
 config.toml
 
+# Signing material — keystores are operator-provided and MUST NOT be
+# committed (security follow-up #8). The operator references their
+# keystore via [signing].android_keystore (absolute path on the build host)
+# and ANDROID_KEY_PASSWORD env var.
+*.keystore
+
 # Build output
 output/
 
@@ -12,3 +18,6 @@ __pycache__/
 *.py[cod]
 *.pyo
 .pytest_cache/
+
+# uv virtualenv (the lockfile uv.lock IS tracked for reproducible `uv run`)
+.venv/

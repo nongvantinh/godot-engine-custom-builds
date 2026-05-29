@@ -1,47 +1,53 @@
+# Reconciled with upstream build-containers@3f3cc50 Dockerfile.appleembedded.
+# Kept vendored conventions: ARG IMAGE_VERSION, REPO_URL label, godot-osx base.
 ARG IMAGE_VERSION=latest
 FROM godot-osx:${IMAGE_VERSION}
 
 ARG IMAGE_VERSION
-ARG REPO_URL="https://github.com/nongvantinh/godot-engine-custom-builds"
+ARG REPO_URL="https://github.com/nongvantinh/godot-build-scripts"
 
 LABEL "org.opencontainers.image.source"="$REPO_URL"
 
-# Copy the necessary files into the image
+# Copy the necessary files into the image (SDK tarballs, build helpers).
 COPY files /root/files
 
-ENV IOS_SDK=18.2
-
 RUN dnf -y install --setopt=install_weak_deps=False \
-      automake autoconf gcc gcc-c++ gcc-objc gcc-objc++ cmake libicu-devel libtool libxml2-devel openssl-devel perl python yasm && \
-    git clone --progress https://github.com/tpoechtrager/cctools-port && \
+      automake autoconf gcc gcc-c++ gcc-objc gcc-objc++ cmake libicu-devel libtool libxml2-devel openssl-devel perl python yasm
+
+# Pin cctools-port to the same commit as upstream Dockerfile.appleembedded.
+RUN git clone --depth 1 --no-checkout https://github.com/tpoechtrager/cctools-port.git && \
     cd /root/cctools-port && \
-    git checkout 81f205e8ca6bbf2fdbcb6948132454fd1f97839e && \
-    # arm64 device
-    usage_examples/ios_toolchain/build.sh /root/files/iPhoneOS${IOS_SDK}.sdk.tar.xz arm64 && \
+    git fetch --depth 1 origin 1cce4a06877992f708b2e0e2ab217a0cfb923a4f && \
+    git checkout 1cce4a06877992f708b2e0e2ab217a0cfb923a4f
+
+COPY files/appleembedded/build.sh /root/cctools-port/usage_examples/ios_toolchain/build.sh
+COPY files/appleembedded/wrapper.c /root/cctools-port/usage_examples/ios_toolchain/wrapper.c
+
+RUN chmod +x /root/cctools-port/usage_examples/ios_toolchain/build.sh
+
+# arm64 device toolchain.
+RUN cd /root/cctools-port && \
+    usage_examples/ios_toolchain/build.sh arm64 && \
     mkdir -p /root/ioscross/arm64 && \
     mv usage_examples/ios_toolchain/target/* /root/ioscross/arm64 && \
     mkdir /root/ioscross/arm64/usr && \
-    ln -s /root/ioscross/arm64/bin /root/ioscross/arm64/usr/bin && \
-    # Prepare for simulator builds
-    sed -i '/WRAPPER_SDKDIR/s/iPhoneOS/iPhoneSimulator/' usage_examples/ios_toolchain/build.sh && \
-    # arm64 simulator
-    usage_examples/ios_toolchain/build.sh /root/files/iPhoneSimulator${IOS_SDK}.sdk.tar.xz arm64 && \
-    mkdir -p /root/ioscross/arm64_sim && \
-    mv usage_examples/ios_toolchain/target/* /root/ioscross/arm64_sim && \
-    mkdir /root/ioscross/arm64_sim/usr && \
-    ln -s /root/ioscross/arm64_sim/bin /root/ioscross/arm64_sim/usr/bin && \
-    # x86_64 simulator
-    sed -i 's/^TRIPLE=.*/TRIPLE="x86_64-apple-darwin11"/' usage_examples/ios_toolchain/build.sh && \
-    usage_examples/ios_toolchain/build.sh /root/files/iPhoneSimulator${IOS_SDK}.sdk.tar.xz x86_64 && \
-    mkdir -p /root/ioscross/x86_64_sim && \
-    mv usage_examples/ios_toolchain/target/* /root/ioscross/x86_64_sim && \
-    mkdir /root/ioscross/x86_64_sim/usr && \
-    ln -s /root/ioscross/x86_64_sim/bin /root/ioscross/x86_64_sim/usr/bin && \
-    cd /root && \
-    rm -rf /root/cctools-port
+    ln -s /root/ioscross/arm64/bin /root/ioscross/arm64/usr/bin
+
+# x86_64 simulator toolchain.
+RUN cd /root/cctools-port && \
+    usage_examples/ios_toolchain/build.sh x86_64 && \
+    mkdir -p /root/ioscross/x86_64 && \
+    mv usage_examples/ios_toolchain/target/* /root/ioscross/x86_64 && \
+    mkdir /root/ioscross/x86_64/usr && \
+    ln -s /root/ioscross/x86_64/bin /root/ioscross/x86_64/usr/bin
+
+RUN PATH=/root/ioscross/arm64/bin:$PATH /root/files/appleembedded/check-arm.sh
 
 ENV OSXCROSS_IOS=not_nothing
-ENV IOSCROSS_ROOT=/root/ioscross
-ENV PATH="/root/ioscross/arm64/bin:/root/ioscross/arm64_sim/bin:/root/ioscross/x86_64_sim/bin:${PATH}"
+ENV OSXCROSS_TVOS=not_nothing
+ENV OSXCROSS_VISIONOS=not_nothing
+ENV OSXCROSS_APPLEEMBEDDED=not_nothing
+
+ENV PATH="/root/ioscross/arm64/bin:/root/ioscross/x86_64/bin:${PATH}"
 
 CMD ["/bin/bash"]

@@ -117,12 +117,19 @@ def run_build(
         shell_script = f"scons {scons_flags} && {copy_step}"
 
     cmd = [
-        "docker", "run", "--rm",
-        "--workdir", "/root/godot",
-        "-v", f"{source_dir}:/root/godot",
-        "-v", f"{output_dir}:/root/out",
+        "docker",
+        "run",
+        "--rm",
+        "--workdir",
+        "/root/godot",
+        "-v",
+        f"{source_dir}:/root/godot",
+        "-v",
+        f"{output_dir}:/root/out",
         image,
-        "bash", "-c", shell_script,
+        "bash",
+        "-c",
+        shell_script,
     ]
 
     if dry_run:
@@ -157,6 +164,19 @@ def login(registry: str, username: str, dry_run: bool = False) -> None:
     ConfigError
         If ``GHCR_PAT`` is not set in the environment.
     """
+    cmd = [
+        "docker",
+        "login",
+        registry,
+        "--username",
+        username,
+        "--password-stdin",
+    ]
+    if dry_run:
+        # In dry-run we never execute the login, so the PAT is not required.
+        logger.info("[dry-run] Would run: echo $GHCR_PAT | %s", " ".join(cmd))
+        return
+
     pat = os.environ.get("GHCR_PAT")
     if not pat:
         raise ConfigError(
@@ -164,14 +184,6 @@ def login(registry: str, username: str, dry_run: bool = False) -> None:
             "Export your GitHub Personal Access Token before running:\n"
             "  export GHCR_PAT=<your-token>"
         )
-    cmd = [
-        "docker", "login", registry,
-        "--username", username,
-        "--password-stdin",
-    ]
-    if dry_run:
-        logger.info("[dry-run] Would run: echo $GHCR_PAT | %s", " ".join(cmd))
-        return
     logger.info("Logging in to %s as %s", registry, username)
     try:
         subprocess.run(cmd, input=pat.encode(), check=True)

@@ -6,5 +6,10 @@ requires-python = ">=3.11"
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 
+# uv installs the default dependency-groups for `uv run`, so `uv run pytest`
+# works without an explicit `--extra dev`.
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

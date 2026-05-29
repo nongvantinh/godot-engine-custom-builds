@@ -1,9 +1,23 @@
 """Tests for scripts/config.py — TOML configuration loader and validator."""
+
 from __future__ import annotations
 
 import pytest
 
-from scripts.config import ConfigError, get_platform_config, load_config
+from unittest import mock
+
+from scripts.config import (
+    DEFAULT_BUILD_JOBS,
+    DEFAULT_PLATFORM_ARCHS,
+    ConfigError,
+    _default_build_jobs,
+    get_build_config,
+    get_platform_archs,
+    get_platform_config,
+    get_release_config,
+    get_scons_config,
+    load_config,
+)
 
 # ---------------------------------------------------------------------------
 # Shared test data
@@ -48,7 +62,8 @@ class TestLoadConfigHappyPath:
         toml_file = tmp_path / "config.toml"
         _write_toml(
             toml_file,
-            _MINIMAL_VALID_TOML + '\n[scons]\nuse_lto = true\nextra_flags = "lto=full"\n',
+            _MINIMAL_VALID_TOML
+            + '\n[scons]\nuse_lto = true\nextra_flags = "lto=full"\n',
         )
 
         cfg = load_config(str(toml_file))
@@ -174,7 +189,9 @@ scons_flags = "platform=linuxbsd"
         with pytest.raises(ConfigError, match="image"):
             load_config(str(toml_file))
 
-    def test_raises_config_error_when_platform_entry_missing_scons_flags(self, tmp_path):
+    def test_raises_config_error_when_platform_entry_missing_scons_flags(
+        self, tmp_path
+    ):
         toml_file = tmp_path / "config.toml"
         _write_toml(
             toml_file,
@@ -369,3 +386,285 @@ scons_flags = "platform=windows"
         assert entry is not None
         assert entry["name"] == "windows"
         assert entry["image"] == "ghcr.io/test/windows:4.3"
+
+
+# ---------------------------------------------------------------------------
+# [build] matrix — defaults and validation (§3 schema)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildSectionDefaults:
+    def test_get_build_config_applies_defaults_when_section_absent(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(toml_file, _MINIMAL_VALID_TOML)
+        cfg = load_config(str(toml_file))
+
+        build = get_build_config(cfg)
+
+        assert build["flavors"] == ["release", "debug", "release_debug"]
+        assert build["kinds"] == ["editor", "templates"]
+        assert build["mono"] == ["on", "off"]
+        assert build["build_jobs"] == DEFAULT_BUILD_JOBS
+
+    def test_get_build_config_reads_overrides_when_section_present(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            _MINIMAL_VALID_TOML + "\n[build]\n"
+            'flavors = ["release"]\n'
+            'kinds = ["editor"]\n'
+            'mono = ["on"]\n'
+            "build_jobs = 4\n",
+        )
+        cfg = load_config(str(toml_file))
+
+        build = get_build_config(cfg)
+
+        assert build["flavors"] == ["release"]
+        assert build["kinds"] == ["editor"]
+        assert build["mono"] == ["on"]
+        assert build["build_jobs"] == 4
+
+
+class TestBuildSectionValidation:
+    def test_raises_when_flavor_value_invalid(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            _MINIMAL_VALID_TOML + '\n[build]\nflavors = ["nonsense"]\n',
+        )
+
+        with pytest.raises(ConfigError, match="flavors"):
+            load_config(str(toml_file))
+
+    def test_raises_when_mono_value_invalid(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            _MINIMAL_VALID_TOML + '\n[build]\nmono = ["maybe"]\n',
+        )
+
+        with pytest.raises(ConfigError, match="mono"):
+            load_config(str(toml_file))
+
+    def test_raises_when_build_jobs_not_integer(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            _MINIMAL_VALID_TOML + '\n[build]\nbuild_jobs = "ten"\n',
+        )
+
+        with pytest.raises(ConfigError, match="build_jobs"):
+            load_config(str(toml_file))
+
+
+class TestDefaultBuildJobs:
+    """The build-jobs default is `nproc - 2` (floor of 1)."""
+
+    def test_leaves_two_cores_on_a_16_core_host(self):
+        with mock.patch("scripts.config.os.cpu_count", return_value=16):
+            assert _default_build_jobs() == 14
+
+    def test_floors_at_one_core(self):
+        with mock.patch("scripts.config.os.cpu_count", return_value=2):
+            assert _default_build_jobs() == 1
+        with mock.patch("scripts.config.os.cpu_count", return_value=1):
+            assert _default_build_jobs() == 1
+
+    def test_falls_back_when_cpu_count_is_none(self):
+        with mock.patch("scripts.config.os.cpu_count", return_value=None):
+            # (4 fallback) - 2 = 2
+            assert _default_build_jobs() == 2
+
+    def test_default_is_dynamic_not_hardcoded(self):
+        # The module-level default tracks the running host (nproc - 2, floor 1).
+        import os
+
+        assert DEFAULT_BUILD_JOBS == max(1, (os.cpu_count() or 4) - 2)
+
+
+class TestAppleSdkVersionConfig:
+    """[build].xcode_sdkv / apple_sdkv version strings used by container_builder."""
+
+    def test_defaults_to_xcode_versions(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(toml_file, _MINIMAL_VALID_TOML)
+        build = get_build_config(load_config(str(toml_file)))
+
+        assert build["xcode_sdkv"] == "26.1.1"
+        assert build["apple_sdkv"] == "26.1"
+
+    def test_reads_overrides_when_present(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            _MINIMAL_VALID_TOML + "\n[build]\n"
+            'xcode_sdkv = "27.0"\n'
+            'apple_sdkv = "27.0"\n',
+        )
+        build = get_build_config(load_config(str(toml_file)))
+
+        assert build["xcode_sdkv"] == "27.0"
+        assert build["apple_sdkv"] == "27.0"
+
+
+# ---------------------------------------------------------------------------
+# Per-platform archs
+# ---------------------------------------------------------------------------
+
+
+class TestPlatformArchs:
+    def test_uses_explicit_archs_when_entry_defines_them(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            """\
+registry = "ghcr.io"
+username = "testuser"
+godot_version = "4.3"
+
+[[platforms]]
+name = "linux"
+image = "ghcr.io/test/linux:4.3"
+scons_flags = "platform=linuxbsd"
+archs = ["x86_64"]
+""",
+        )
+        cfg = load_config(str(toml_file))
+
+        assert get_platform_archs(cfg, "linux") == ["x86_64"]
+
+    def test_falls_back_to_default_matrix_when_archs_absent(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(toml_file, _MINIMAL_VALID_TOML)
+        cfg = load_config(str(toml_file))
+
+        assert get_platform_archs(cfg, "linux") == DEFAULT_PLATFORM_ARCHS["linux"]
+
+    def test_raises_when_archs_is_not_a_string_array(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            """\
+registry = "ghcr.io"
+username = "testuser"
+godot_version = "4.3"
+
+[[platforms]]
+name = "linux"
+image = "ghcr.io/test/linux:4.3"
+scons_flags = "platform=linuxbsd"
+archs = "x86_64"
+""",
+        )
+
+        with pytest.raises(ConfigError, match="archs"):
+            load_config(str(toml_file))
+
+
+# ---------------------------------------------------------------------------
+# [scons] alignment keys (Phase A)
+# ---------------------------------------------------------------------------
+
+
+class TestSconsSection:
+    def test_scons_defaults_applied_when_section_absent(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(toml_file, _MINIMAL_VALID_TOML)
+        cfg = load_config(str(toml_file))
+
+        scons = get_scons_config(cfg)
+
+        assert scons["accesskit_sdk_path"] == "/root/accesskit/accesskit-c"
+        assert scons["redirect_build_objects"] is False
+
+    def test_scons_alignment_keys_read_when_present(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            _MINIMAL_VALID_TOML + "\n[scons]\n"
+            'accesskit_sdk_path = "/custom/accesskit"\n'
+            "redirect_build_objects = true\n",
+        )
+        cfg = load_config(str(toml_file))
+
+        scons = get_scons_config(cfg)
+
+        assert scons["accesskit_sdk_path"] == "/custom/accesskit"
+        assert scons["redirect_build_objects"] is True
+
+
+# ---------------------------------------------------------------------------
+# [release] table (Phase D)
+# ---------------------------------------------------------------------------
+
+
+class TestReleaseSection:
+    def test_release_defaults_applied_when_section_absent(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(toml_file, _MINIMAL_VALID_TOML)
+        cfg = load_config(str(toml_file))
+
+        release = get_release_config(cfg)
+
+        assert release["tag"] == "v4.7-dev1"
+        assert release["repo"] == "nongvantinh/godot-build-scripts"
+        assert release["auto_upload"] is True
+        assert release["prerelease"] is True
+        assert release["draft"] is False
+
+    def test_release_overrides_read_when_present(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            _MINIMAL_VALID_TOML + "\n[release]\n"
+            'tag = "v9.9-test"\n'
+            'repo = "owner/repo"\n'
+            "auto_upload = false\n"
+            "prerelease = false\n",
+        )
+        cfg = load_config(str(toml_file))
+
+        release = get_release_config(cfg)
+
+        assert release["tag"] == "v9.9-test"
+        assert release["repo"] == "owner/repo"
+        assert release["auto_upload"] is False
+        assert release["prerelease"] is False
+
+    def test_raises_when_release_tag_not_a_string(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            _MINIMAL_VALID_TOML + "\n[release]\ntag = 47\n",
+        )
+
+        with pytest.raises(ConfigError, match="tag"):
+            load_config(str(toml_file))
+
+
+# ---------------------------------------------------------------------------
+# Secrets guard covers new tables
+# ---------------------------------------------------------------------------
+
+
+class TestSecretsGuardNewTables:
+    def test_raises_when_token_nested_in_release_table(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            _MINIMAL_VALID_TOML + '\n[release]\ntoken = "supersecret"\n',
+        )
+
+        with pytest.raises(ConfigError, match="token"):
+            load_config(str(toml_file))
+
+    def test_raises_when_ghcr_pat_nested_in_build_table(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            _MINIMAL_VALID_TOML + '\n[build]\nghcr_pat = "supersecret"\n',
+        )
+
+        with pytest.raises(ConfigError, match="ghcr_pat"):
+            load_config(str(toml_file))

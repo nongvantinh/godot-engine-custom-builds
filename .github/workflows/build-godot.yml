@@ -1,43 +1,39 @@
-name: Build Godot Engine
+name: Build Godot Containers
+
+# CI scope is narrowed to building and pushing the Docker images only (§5.6).
+# The RAM-heavy SCons artifact builds and the GitHub Release upload run LOCALLY
+# on the 16-core host via `build-godot.py release --jobs 10`, because a
+# GitHub-hosted runner cannot satisfy the memory/time budget. There is no
+# artifact-build job and no Release job here, and the previous hardcoded
+# `<version>-custom-1` release tag has been removed.
 
 on:
   workflow_dispatch:
     inputs:
-      godot_branch:
-        description: 'Godot source branch to build'
-        required: false
-        default: '4.7.dev1'
       godot_version:
-        description: 'Version tag for the release (e.g. 4.7.dev1)'
+        description: 'Image version tag (e.g. 4.7)'
         required: false
-        default: '4.7.dev1'
-      platforms:
-        description: 'Platforms to build (comma-separated: linux,windows,android,web)'
+        default: '4.7'
+      container_types:
+        description: 'Container types to build (comma-separated: base,linux,windows,android,web or all)'
         required: false
-        default: 'linux'
+        default: 'all'
 
 env:
   REGISTRY: ghcr.io
   USERNAME: nongvantinh
 
 jobs:
-  build:
-    name: Build Godot (${{ matrix.platform }})
+  containers:
+    name: Build & push Godot container images
     runs-on: ubuntu-latest
-    # F-03 fix: build job only needs packages:read; contents:write is for release job only
     permissions:
       contents: read
-      packages: read
+      packages: write
     env:
-      # F-02 fix: inputs go into env vars; shell steps reference $GODOT_BRANCH / $GODOT_VERSION
-      GODOT_BRANCH: ${{ github.event.inputs.godot_branch || '4.7.dev1' }}
-      GODOT_VERSION: ${{ github.event.inputs.godot_version || '4.7.dev1' }}
-      # F-07 fix: matrix.platform (user-controlled) goes into env var; never interpolated inline
-      BUILD_PLATFORM: ${{ matrix.platform }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: ${{ fromJson(format('["{0}"]', join(split(github.event.inputs.platforms || 'linux', ','), '","'))) }}
+      # Inputs go into env vars; shell steps reference them — never inline.
+      GODOT_VERSION: ${{ github.event.inputs.godot_version || '4.7' }}
+      CONTAINER_TYPES: ${{ github.event.inputs.container_types || 'all' }}
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -47,12 +43,6 @@ jobs:
       - name: Set up Python via uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
-      - name: Checkout Godot source branch
-        # F-02 fix: use env var, not inline expression
-        run: |
-          git -C upstream/godot fetch origin "$GODOT_BRANCH"
-          git -C upstream/godot checkout "$GODOT_BRANCH"
-
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -61,81 +51,24 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Write config.toml
-        # F-06 fix: use $GODOT_VERSION for image tags (not hardcoded 4.7)
         run: |
           cat > config.toml << EOF
           registry = "ghcr.io"
           username = "nongvantinh"
           godot_version = "${GODOT_VERSION}"
 
-          [scons]
-          use_lto = false
-          extra_flags = ""
-
           [[platforms]]
           name = "linux"
-          image = "ghcr.io/nongvantinh/godot-linux:${GODOT_VERSION%.*}"
-          scons_flags = "platform=linuxbsd arch=x86_64"
-          env_setup = "export PATH=\$GODOT_SDK_LINUX_X86_64/bin:\$BASE_PATH"
-
-          [[platforms]]
-          name = "windows"
-          image = "ghcr.io/nongvantinh/godot-windows:${GODOT_VERSION%.*}"
-          scons_flags = "platform=windows arch=x86_64 use_mingw=yes mingw_prefix=/root/llvm-mingw"
-
-          [[platforms]]
-          name = "android"
-          image = "ghcr.io/nongvantinh/godot-android:${GODOT_VERSION%.*}"
-          scons_flags = "platform=android"
-
-          [[platforms]]
-          name = "web"
-          image = "ghcr.io/nongvantinh/godot-web:${GODOT_VERSION%.*}"
-          scons_flags = "platform=web"
-          env_setup = "source /root/emsdk/emsdk_env.sh"
+          image = "ghcr.io/nongvantinh/godot-linux:${GODOT_VERSION}"
+          scons_flags = "platform=linuxbsd"
           EOF
 
-      - name: Build Godot for ${{ matrix.platform }}
-        # F-07 fix: use $BUILD_PLATFORM env var instead of inline ${{ matrix.platform }}
+      - name: Build & push container images
+        env:
+          # build-godot.py reads GHCR_PAT for the in-tool push login.
+          GHCR_PAT: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p output
-          uv run python build-godot.py build \
-            --platform "$BUILD_PLATFORM" \
-            --target editor \
-            --verbose
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: godot-${{ env.GODOT_VERSION }}-${{ matrix.platform }}
-          path: output/
-
-  release:
-    name: Create GitHub Release
-    runs-on: ubuntu-latest
-    needs: build
-    permissions:
-      contents: write
-    env:
-      GODOT_BRANCH: ${{ github.event.inputs.godot_branch || '4.7.dev1' }}
-      GODOT_VERSION: ${{ github.event.inputs.godot_version || '4.7.dev1' }}
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          path: dist/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          tag_name: ${{ env.GODOT_VERSION }}-custom-1
-          name: "Godot ${{ env.GODOT_VERSION }} (custom build)"
-          body: |
-            Custom Godot ${{ env.GODOT_VERSION }} build from branch [${{ env.GODOT_BRANCH }}](https://github.com/nongvantinh/godot/tree/${{ env.GODOT_BRANCH }}).
-
-            Built with updated Docker images (Fedora 43, SCons 4.10.1).
-          files: dist/**/*
-          draft: false
-          prerelease: true
+          uv run python build-godot.py containers \
+            --type "$CONTAINER_TYPES" \
+            --version "$GODOT_VERSION" \
+            --push
