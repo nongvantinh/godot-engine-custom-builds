@@ -710,6 +710,15 @@ def _package_android_classical(
     else:
         logger.warning("Skipping Android .aar: %s missing.", lib)
 
+    # Native debug symbols zip (for Google Play Console / ndk-stack
+    # symbolication). Standalone Release asset — NOT bundled in the .tpz.
+    _package_android_native_symbols(
+        templates_src,
+        release_dir,
+        templates_version,
+        mono=False,
+    )
+
     # Editor APKs / AAB (best-effort)
     for editor in (
         "android_editor.apk",
@@ -752,12 +761,57 @@ def _package_android_mono(
     else:
         logger.info("Skipping Android mono .aar: %s missing.", lib)
 
+    _package_android_native_symbols(
+        templates_src,
+        release_dir_mono,
+        templates_version,
+        mono=True,
+    )
+
     if templates_src.is_dir():
         for apk in sorted(templates_src.glob("*.apk")):
             shutil.copy2(apk, templates_dir_mono / apk.name)
         src_zip = templates_src / "android_source.zip"
         if src_zip.is_file():
             shutil.copy2(src_zip, templates_dir_mono / "android_source.zip")
+
+
+# Basename of the native debug symbols zip the Android template_release build
+# emits (see scripts/in_container/build_android.py::_NATIVE_SYMBOLS_ZIP).
+_ANDROID_NATIVE_SYMBOLS_ZIP = "android-template-release-native-symbols.zip"
+
+
+def _package_android_native_symbols(
+    templates_src: Path,
+    release_dir: Path,
+    templates_version: str,
+    *,
+    mono: bool,
+) -> None:
+    """Stage the Android native debug symbols zip as a standalone Release asset.
+
+    The zip is used to symbolicate native crash stack traces from the Google
+    Play Console / Firebase Crashlytics (or locally via ``ndk-stack``). It is
+    published next to the ``.aar`` — and deliberately NOT placed inside the
+    ``.tpz`` export-template bundle, since it is a debugging aid, not a runtime
+    template. The ``godot-lib.`` prefix mirrors the ``.aar`` naming and gets the
+    asset a line in ``SHA512-SUMS.txt`` (which hashes ``g``-prefixed files).
+
+    Absent zip is logged at INFO and skipped — it only exists when the
+    template_release matrix was built with the symbol flags.
+    """
+    src = templates_src / _ANDROID_NATIVE_SYMBOLS_ZIP
+    if not src.is_file():
+        logger.info(
+            "Skipping Android%s native debug symbols: %s missing.",
+            " mono" if mono else "",
+            src,
+        )
+        return
+    infix = "mono.template_release" if mono else "template_release"
+    dest = release_dir / f"godot-lib.{templates_version}.{infix}.native-symbols.zip"
+    shutil.copy2(src, dest)
+    logger.info("Staged Android native debug symbols: %s", dest)
 
 
 # ---------------------------------------------------------------------------

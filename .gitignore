@@ -21,3 +21,6 @@ __pycache__/
 
 # uv virtualenv (the lockfile uv.lock IS tracked for reproducible `uv run`)
 .venv/
+
+# Detached release-run pid files
+*.pid

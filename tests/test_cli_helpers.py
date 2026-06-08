@@ -208,6 +208,8 @@ def _release_args(config_path, **overrides) -> argparse.Namespace:
         do_build=False,
         do_package=False,
         do_upload=True,
+        do_nuget=False,
+        do_nuget_overwrite=None,
         tag=None,
         jobs=10,
         godot_repo=None,
@@ -279,6 +281,127 @@ class TestReleaseExitCodes:
 
         assert rc == 0
         publish.assert_called_once()
+
+    def test_nuget_published_after_release_upload(self, cli, config_path):
+        # do_nuget=True wires collect_nupkgs -> publish_nupkgs after the
+        # gh-release upload, deriving the feed from username.
+        args = _release_args(config_path, do_nuget=True)
+
+        with (
+            mock.patch.object(
+                cli, "collect_release_assets", return_value=[Path("/tmp/a.zip")]
+            ),
+            mock.patch.object(cli, "publish_release"),
+            mock.patch.object(
+                cli, "collect_nupkgs", return_value=[Path("/tmp/GodotSharp.nupkg")]
+            ),
+            mock.patch.object(cli, "nuget_token_from_env", return_value="tok"),
+            mock.patch.object(cli, "delete_nupkg_versions") as overwrite,
+            mock.patch.object(cli, "publish_nupkgs") as push,
+        ):
+            rc = cli.cmd_release(args)
+
+        assert rc == 0
+        push.assert_called_once()
+        kwargs = push.call_args.kwargs
+        # Feed is derived from the config's username.
+        assert kwargs["source"].startswith("https://nuget.pkg.github.com/")
+        assert kwargs["source"].endswith("/index.json")
+        assert kwargs["api_key"] == "tok"
+        # Overwrite is on by default: existing versions are deleted before push.
+        overwrite.assert_called_once()
+        assert overwrite.call_args.kwargs["api_key"] == "tok"
+
+    def test_nuget_publishes_even_when_release_upload_skipped(self, cli, config_path):
+        # NuGet push is an independent publish target: --no-upload + --nuget
+        # still pushes packages.
+        args = _release_args(config_path, do_upload=False, do_nuget=True)
+
+        with (
+            mock.patch.object(
+                cli, "collect_nupkgs", return_value=[Path("/tmp/GodotSharp.nupkg")]
+            ),
+            mock.patch.object(cli, "nuget_token_from_env", return_value="tok"),
+            mock.patch.object(cli, "delete_nupkg_versions"),
+            mock.patch.object(cli, "publish_nupkgs") as push,
+            mock.patch.object(cli, "publish_release") as release,
+        ):
+            rc = cli.cmd_release(args)
+
+        assert rc == 0
+        release.assert_not_called()
+        push.assert_called_once()
+
+    def test_exits_five_when_nuget_publish_fails(self, cli, config_path):
+        args = _release_args(config_path, do_upload=False, do_nuget=True)
+
+        with (
+            mock.patch.object(
+                cli, "collect_nupkgs", return_value=[Path("/tmp/GodotSharp.nupkg")]
+            ),
+            mock.patch.object(cli, "nuget_token_from_env", return_value="tok"),
+            mock.patch.object(cli, "delete_nupkg_versions"),
+            mock.patch.object(
+                cli, "publish_nupkgs", side_effect=cli.PublishError("boom")
+            ),
+        ):
+            rc = cli.cmd_release(args)
+
+        assert rc == 5
+
+
+# ---------------------------------------------------------------------------
+# release runs the cosmetic chown LAST (after publish), and it is non-fatal
+# ---------------------------------------------------------------------------
+
+
+class TestReleaseChownRunsLast:
+    def test_chown_invoked_at_end_of_release(self, cli, config_path):
+        # Even with build/package/upload/nuget all skipped, the release flow
+        # still hands the outputs back to the user as its final step.
+        args = _release_args(config_path, do_upload=False, do_nuget=False)
+
+        with mock.patch.object(cli, "_chown_outputs") as chown:
+            rc = cli.cmd_release(args)
+
+        assert rc == 0
+        chown.assert_called_once()
+        assert chown.call_args.kwargs.get("dry_run") is False
+
+    def test_chown_runs_after_publish_and_nuget(self, cli, config_path):
+        # Ordering guarantee: the chown is the tail of the flow, after both the
+        # release upload and the NuGet push — so an interruption there cannot
+        # cost the publish.
+        calls: list[str] = []
+        args = _release_args(config_path, do_upload=True, do_nuget=True)
+
+        with (
+            mock.patch.object(
+                cli, "collect_release_assets", return_value=[Path("/tmp/a.zip")]
+            ),
+            mock.patch.object(
+                cli, "publish_release", side_effect=lambda **k: calls.append("upload")
+            ),
+            mock.patch.object(
+                cli, "collect_nupkgs", return_value=[Path("/tmp/GodotSharp.nupkg")]
+            ),
+            mock.patch.object(cli, "nuget_token_from_env", return_value="tok"),
+            mock.patch.object(
+                cli, "delete_nupkg_versions", side_effect=lambda **k: calls.append("nuget-del")
+            ),
+            mock.patch.object(
+                cli, "publish_nupkgs", side_effect=lambda **k: calls.append("nuget-push")
+            ),
+            mock.patch.object(
+                cli, "_chown_outputs", side_effect=lambda *a, **k: calls.append("chown")
+            ),
+        ):
+            rc = cli.cmd_release(args)
+
+        assert rc == 0
+        assert calls[-1] == "chown"
+        assert calls.index("upload") < calls.index("chown")
+        assert calls.index("nuget-push") < calls.index("chown")
 
 
 # ---------------------------------------------------------------------------

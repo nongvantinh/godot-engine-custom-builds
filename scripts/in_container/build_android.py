@@ -47,6 +47,60 @@ _OPTIONS_MONO: tuple[str, ...] = (
 )
 _ARCHS: tuple[str, ...] = ("arm32", "arm64", "x86_32", "x86_64")
 
+# Native debug symbols zip produced by SCsub during the last template_release
+# arch build (see _release_symbol_flags). It is not one of the gradle
+# apk/aab/aar outputs, so it needs its own copy step to survive container
+# teardown. (gradle's cleanGodotTemplates would delete it, but
+# generateGodotTemplates does not depend on that clean task.)
+_NATIVE_SYMBOLS_ZIP = "android-template-release-native-symbols.zip"
+
+
+def _release_symbol_flags(arch: str) -> tuple[str, ...]:
+    """Return the native debug-symbol SCons flags for a template_release arch.
+
+    Per the Godot "Resolving crashes on Android" guide
+    (docs.godotengine.org/en/latest/tutorials/platform/android/resolving_crashes_on_android.html):
+
+      * ``debug_symbols=yes`` is set on EVERY arch so each per-arch ``.so`` is
+        compiled with symbols.
+      * ``separate_debug_symbols=yes`` is added ONLY on the final arch
+        (``_ARCHS[-1]``). That last build is when ``platform/android/SCsub``
+        zips the accumulated ``platform/android/java/lib/libs`` tree — by then
+        holding all four arches — into
+        ``bin/android-template-release-native-symbols.zip``. This mirrors how
+        the guide gates ``generate_android_binaries=yes`` to the last command.
+
+    Because this build runs SCons manually and then invokes gradle with the
+    scons tasks excluded (``excludeSconsBuildTasks()`` is true without
+    ``-PgenerateNativeLibs``), gradle packages exactly these libs rather than
+    recompiling them symbol-free.
+    """
+    flags = ["debug_symbols=yes"]
+    if arch == _ARCHS[-1]:
+        flags.append("separate_debug_symbols=yes")
+    return tuple(flags)
+
+
+def _copy_native_symbols(godot_dir: Path, dest: Path) -> None:
+    """Copy ``bin/<_NATIVE_SYMBOLS_ZIP>`` into *dest* if it was produced.
+
+    A missing zip is a WARNING, not fatal — other Android artifacts still
+    publish. (It is absent only if the template_release matrix was built
+    without the symbol flags.)
+    """
+    src = godot_dir / "bin" / _NATIVE_SYMBOLS_ZIP
+    if not src.is_file():
+        logger.warning(
+            "Native debug symbols zip %s not found; skipping. (Was the "
+            "template_release matrix built with debug_symbols + "
+            "separate_debug_symbols?)",
+            src,
+        )
+        return
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest / src.name)
+    logger.info("Copied Android native debug symbols to %s", dest / src.name)
+
 
 def _ensure_signing_env() -> None:
     """Keystore guard for the Android template build.
@@ -188,12 +242,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"arch={arch}",
                     *_OPTIONS,
                     "target=template_release",
+                    *_release_symbol_flags(arch),
                     num_cores=num_cores,
                     env=env,
                     cwd=godot_dir,
                 )
 
             common.gradle_wrapper(godot_dir, "generateGodotTemplates")
+            _copy_native_symbols(godot_dir, out_root / "templates")
 
             if store_release == "yes":
                 # Copy source folder with compiled libs so we can optionally
@@ -231,12 +287,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     *_OPTIONS,
                     *_OPTIONS_MONO,
                     "target=template_release",
+                    *_release_symbol_flags(arch),
                     num_cores=num_cores,
                     env=env,
                     cwd=godot_dir,
                 )
 
             common.gradle_wrapper(godot_dir, "generateGodotMonoTemplates")
+            _copy_native_symbols(godot_dir, out_root / "templates-mono")
             _copy_template_outputs(godot_dir, out_root / "templates-mono", mono=True)
 
         logger.info("Android build successful")

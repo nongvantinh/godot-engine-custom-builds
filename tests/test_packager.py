@@ -112,11 +112,15 @@ def _stage_web(out_dir: Path) -> None:
         _write(web_templates / f"godot.web.template_{v}.wasm32.nothreads.dlink.zip")
 
 
-def _stage_android(out_dir: Path, *, mono: bool = False) -> None:
+def _stage_android(
+    out_dir: Path, *, mono: bool = False, native_symbols: bool = True
+) -> None:
     templates = out_dir / "android" / ("templates-mono" if mono else "templates")
     _write(templates / "godot-lib.template_release.aar")
     _write(templates / "android_release.apk")
     _write(templates / "android_source.zip")
+    if native_symbols:
+        _write(templates / "android-template-release-native-symbols.zip")
     if not mono:
         tools = out_dir / "android" / "tools"
         _write(tools / "android_editor.apk")
@@ -217,6 +221,11 @@ class TestFullMatrix:
         assert (
             release_dir / f"godot-lib.{_TEMPLATES_VERSION}.template_release.aar"
         ).is_file()
+        # Android native debug symbols zip (classical), standalone Release asset.
+        assert (
+            release_dir
+            / f"godot-lib.{_TEMPLATES_VERSION}.template_release.native-symbols.zip"
+        ).is_file()
 
         # Mono editor zips
         mono_dir = release_dir / "mono"
@@ -226,11 +235,23 @@ class TestFullMatrix:
             assert (mono_dir / f"{_GODOT_BASENAME}_mono_win{arch}.zip").is_file()
         assert (mono_dir / f"{_GODOT_BASENAME}_mono_macos.universal.zip").is_file()
 
+        # Android mono native debug symbols zip.
+        assert (
+            mono_dir
+            / f"godot-lib.{_TEMPLATES_VERSION}.mono.template_release.native-symbols.zip"
+        ).is_file()
+
         # .tpz bundles (both flavors)
         tpz = release_dir / f"{_GODOT_BASENAME}_export_templates.tpz"
         tpz_mono = mono_dir / f"{_GODOT_BASENAME}_mono_export_templates.tpz"
         assert tpz.is_file()
         assert tpz_mono.is_file()
+
+        # The native symbols zip is a standalone asset — NOT inside the .tpz.
+        with zipfile.ZipFile(tpz) as zf:
+            assert not any(
+                "native-symbols" in n for n in zf.namelist()
+            ), "native symbols must not be bundled in the .tpz"
 
         # SHA512-SUMS.txt in both
         assert (release_dir / "SHA512-SUMS.txt").is_file()
@@ -304,6 +325,62 @@ class TestFullMatrix:
         assert rc == 0
         assert not (basedir / "releases").exists()
         assert not (basedir / "tmp").exists()
+
+
+# ---------------------------------------------------------------------------
+# Android native debug symbols
+# ---------------------------------------------------------------------------
+
+
+class TestAndroidNativeDebugSymbols:
+    def test_symbols_zip_skipped_when_absent(self, basedir, upstream_godot):
+        # A build without the symbol flags produces no zip; packaging must still
+        # succeed and simply omit the asset.
+        out_dir = basedir / "out"
+        _stage_linux(out_dir, mono=False, archs=("x86_64",))
+        _stage_android(out_dir, mono=False, native_symbols=False)
+        _stage_upstream_apple(upstream_godot)
+
+        rc = packager.package_release(
+            basedir=basedir,
+            godot_version=_GODOT_VERSION,
+            godot_version_status=_STATUS,
+            upstream_godot_dir=upstream_godot,
+            dry_run=False,
+        )
+
+        assert rc == 0
+        release_dir = basedir / "releases" / _BINARIES_VERSION
+        # .aar still published; symbols zip absent.
+        assert (
+            release_dir / f"godot-lib.{_TEMPLATES_VERSION}.template_release.aar"
+        ).is_file()
+        assert not (
+            release_dir
+            / f"godot-lib.{_TEMPLATES_VERSION}.template_release.native-symbols.zip"
+        ).is_file()
+
+    def test_symbols_zip_hashed_in_sha512_sums(self, basedir, upstream_godot):
+        out_dir = basedir / "out"
+        _stage_linux(out_dir, mono=False, archs=("x86_64",))
+        _stage_android(out_dir, mono=False, native_symbols=True)
+        _stage_upstream_apple(upstream_godot)
+
+        packager.package_release(
+            basedir=basedir,
+            godot_version=_GODOT_VERSION,
+            godot_version_status=_STATUS,
+            upstream_godot_dir=upstream_godot,
+            dry_run=False,
+        )
+
+        sums = (
+            basedir / "releases" / _BINARIES_VERSION / "SHA512-SUMS.txt"
+        ).read_text()
+        assert (
+            f"godot-lib.{_TEMPLATES_VERSION}.template_release.native-symbols.zip"
+            in sums
+        )
 
 
 # ---------------------------------------------------------------------------

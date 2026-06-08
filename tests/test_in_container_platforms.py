@@ -504,6 +504,93 @@ class TestBuildAndroid:
         gradle_tasks = [c.args[1] for c in gradle.call_args_list]
         assert gradle_tasks == ["generateGodotEditor", "generateGodotTemplates"]
 
+    def test_template_release_carries_native_debug_symbol_flags(
+        self, base_env, tmp_path
+    ):
+        # Per the Godot "Resolving crashes on Android" guide: debug_symbols=yes
+        # on every template_release arch, separate_debug_symbols=yes only on the
+        # last (x86_64); template_debug carries neither.
+        base_env.setenv("MONO", "0")
+        for var in (
+            "GODOT_ANDROID_SIGN_KEYSTORE",
+            "GODOT_ANDROID_SIGN_KEY_ALIAS",
+            "GODOT_ANDROID_SIGN_PASSWORD",
+        ):
+            base_env.delenv(var, raising=False)
+        godot = tmp_path / "godot"
+        (godot / "bin").mkdir(parents=True)
+
+        with (
+            mock.patch.object(
+                build_android.common, "setup_godot_source", return_value=godot
+            ),
+            mock.patch.object(build_android.common, "apply_swappy"),
+            mock.patch.object(
+                build_android.common, "run_scons", return_value=0
+            ) as run_scons,
+            mock.patch.object(build_android.common, "gradle_wrapper"),
+        ):
+            build_android.main([])
+
+        args_list = _scons_call_args(run_scons)
+        release_calls = [a for a in args_list if "target=template_release" in a]
+        debug_calls = [a for a in args_list if "target=template_debug" in a]
+
+        # 4 arches built for release; every one carries debug_symbols=yes.
+        assert len(release_calls) == 4
+        for a in release_calls:
+            assert "debug_symbols=yes" in a
+        # Exactly one (the last arch, x86_64) carries separate_debug_symbols=yes.
+        sep = [a for a in release_calls if "separate_debug_symbols=yes" in a]
+        assert len(sep) == 1
+        assert "arch=x86_64" in sep[0]
+        # template_debug stays symbol-free (the guide only covers release).
+        for a in debug_calls:
+            assert "debug_symbols=yes" not in a
+            assert "separate_debug_symbols=yes" not in a
+
+    def test_native_symbols_zip_copied_to_templates_out(self, base_env, tmp_path):
+        base_env.setenv("MONO", "0")
+        for var in (
+            "GODOT_ANDROID_SIGN_KEYSTORE",
+            "GODOT_ANDROID_SIGN_KEY_ALIAS",
+            "GODOT_ANDROID_SIGN_PASSWORD",
+        ):
+            base_env.delenv(var, raising=False)
+        godot = tmp_path / "godot"
+
+        # The classical flow rmtree's the source and re-runs setup before the
+        # templates pass, so setup recreates bin/ each time it is called.
+        def fake_setup():
+            (godot / "bin").mkdir(parents=True, exist_ok=True)
+            return godot
+
+        # SCsub writes the zip during the final template_release build (the one
+        # carrying separate_debug_symbols=yes); simulate that side effect.
+        def fake_scons(*args, **kwargs):
+            if "separate_debug_symbols=yes" in args:
+                (godot / "bin" / build_android._NATIVE_SYMBOLS_ZIP).write_text(
+                    "symbols"
+                )
+            return 0
+
+        with (
+            mock.patch.object(
+                build_android.common, "setup_godot_source", side_effect=fake_setup
+            ),
+            mock.patch.object(build_android.common, "apply_swappy"),
+            mock.patch.object(
+                build_android.common, "run_scons", side_effect=fake_scons
+            ),
+            mock.patch.object(build_android.common, "gradle_wrapper"),
+        ):
+            build_android.main([])
+
+        out_root = tmp_path / "out"
+        copied = out_root / "templates" / build_android._NATIVE_SYMBOLS_ZIP
+        assert copied.is_file()
+        assert copied.read_text() == "symbols"
+
 
 # ---------------------------------------------------------------------------
 # build_macos

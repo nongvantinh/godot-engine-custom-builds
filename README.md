@@ -17,11 +17,12 @@ file:
 2. [CLI Reference](#cli-reference)
 3. [config.toml Key Reference](#configtoml-key-reference)
 4. [Android signing](#android-signing)
-5. [Upstream Submodules](#upstream-submodules)
-6. [Resumability](#resumability)
-7. [Known limitations](#known-limitations)
-8. [Patch System](#patch-system)
-9. [Troubleshooting](#troubleshooting)
+5. [Android native debug symbols](#android-native-debug-symbols)
+6. [Upstream Submodules](#upstream-submodules)
+7. [Resumability](#resumability)
+8. [Known limitations](#known-limitations)
+9. [Patch System](#patch-system)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -116,26 +117,86 @@ system; floor of 1) — on a 16-core host that is `-j14`. CI only builds and
 pushes the Docker images.
 
 ```bash
-export GHCR_PAT=<token>   # for image pulls + publish (repo scope)
-gh auth status            # gh must be authenticated for the release upload
+export GHCR_PAT=<token>                    # image pulls + GitHub Release (repo scope)
+export GITHUB_PERSONAL_ACCESS_TOKEN=<token> # NuGet push (needs write:packages)
+gh auth status                             # gh must be authenticated for the release upload
 
 # One command: build the configured matrix, generate Mono glue once, package
-# editor zips + .tpz (classical + mono) + version.txt + SHA512-SUMS.txt, and
-# publish a real GitHub Release on tag 4.7-dev1 (prerelease).
+# editor zips + .tpz (classical + mono) + version.txt + SHA512-SUMS.txt,
+# publish a real GitHub Release on tag 4.7-dev1 (prerelease), and push the Mono
+# NuGet packages (GodotSharp, GodotSharpEditor, Godot.SourceGenerators,
+# Godot.NET.Sdk) to GitHub Packages.
 # Omit --jobs to use the nproc-2 default; pass it to override (e.g. lower for
 # RAM-heavy Mono passes).
 uv run python build-godot.py release --jobs 14
 ```
 
+The NuGet step runs after the Release upload. The Mono build emits the managed
+packages into every `out/<plat>/<arch>/tools-mono/GodotSharp/Tools/nupkgs/`
+dir; they used to ride along only inside the editor zip and were never pushed
+to the feed. `release` now publishes one canonical copy of each (from the Linux
+x86_64 build) to `https://nuget.pkg.github.com/<username>/index.json` with
+`dotnet nuget push --skip-duplicate --no-symbols`. The token is read from
+`GITHUB_PERSONAL_ACCESS_TOKEN` (then `GHCR_PAT`, then `GITHUB_TOKEN`) — any PAT
+with the `write:packages` scope works. Toggle with `[release].publish_nuget` or
+the `--no-nuget` flag; override the feed with `[release].nuget_source`.
+
+**Overwriting an existing NuGet version.** GitHub Packages rejects re-pushing an
+existing package id+version, so `--skip-duplicate` alone would *skip* a rebuilt
+package and leave the stale one published. To make `release` actually replace it,
+the NuGet step **overwrites by default** (`[release].nuget_overwrite = true`):
+before pushing, it reads each package's id+version from the built `.nupkg`'s
+nuspec, and `DELETE`s the matching version from the feed via
+`gh api /users/<username>/packages/nuget/<pkg>/versions/<id>` (a no-op when the
+version is not published yet). This deletion needs a token with the
+`delete:packages` scope. Because `gh auth login` tokens usually carry only
+`repo`/`workflow`, the delete calls run `gh` with `GH_TOKEN` set to the NuGet PAT
+(`GITHUB_PERSONAL_ACCESS_TOKEN`/`GHCR_PAT`/`GITHUB_TOKEN`) so the
+`delete:packages` scope is available. The Release-asset side is overwritten the
+same way conceptually: `gh release upload ... --clobber` replaces same-named
+assets when the Release already exists. Disable the NuGet overwrite with
+`--no-nuget-overwrite` (push then skips existing versions via `--skip-duplicate`).
+
 Resumable / partial runs:
 
 ```bash
-# Re-publish without rebuilding (e.g. after a transient gh failure → exit 5)
+# Re-publish without rebuilding (e.g. after a transient gh/nuget failure → exit 5)
 uv run python build-godot.py release --no-build --no-package --upload
 
-# Stop after producing artifacts (no publish)
-uv run python build-godot.py release --no-upload
+# Stop after producing artifacts (no GitHub Release, no NuGet push)
+uv run python build-godot.py release --no-upload --no-nuget
+
+# Push only the NuGet packages from an existing build (skip the Release upload)
+uv run python build-godot.py release --no-build --no-package --no-upload --nuget
 ```
+
+#### Consuming the published packages
+
+The packages live in a **private** GitHub Packages feed, so any machine that
+restores them must register the feed with a token that has the `read:packages`
+scope. Add it once per device:
+
+```bash
+# GitHub Packages requires auth even for restore. On Linux there is no
+# encrypted credential store, so --store-password-in-clear-text is required;
+# the PAT is written to ~/.nuget/NuGet/NuGet.Config (chmod 0600).
+dotnet nuget add source https://nuget.pkg.github.com/nongvantinh/index.json \
+  --name github-nongvantinh \
+  --username nongvantinh \
+  --password "$GITHUB_PERSONAL_ACCESS_TOKEN" \
+  --store-password-in-clear-text
+
+# Verify the feed resolves a package:
+dotnet package search GodotSharp --source github-nongvantinh   # may show nothing — GitHub's feed has no search service
+curl -s -u "nongvantinh:$GITHUB_PERSONAL_ACCESS_TOKEN" \
+  https://nuget.pkg.github.com/nongvantinh/download/godotsharp/index.json   # lists versions
+```
+
+This registers the feed at the **device** level (`~/.nuget/NuGet/NuGet.Config`)
+so the PAT never lands in a committed file. A project that pins its own sources
+with `<clear />` in `NuGet.config` must also add the `github-nongvantinh` source
+key to that file for the build to see it (credentials are still resolved from
+the device config by source name).
 
 ---
 
@@ -181,7 +242,9 @@ uv run python build-godot.py release [OPTIONS]
 | `--build` / `--no-build` | flag | No | `--build` | Run the SCons builds, or reuse existing `out/`. |
 | `--package` / `--no-package` | flag | No | `--package` | Run packaging, or reuse existing artifacts. |
 | `--upload` / `--no-upload` | flag | No | from `[release].auto_upload` | Run `gh release` upload, or stop after producing artifacts. |
-| `--tag` | `str` | No | `[release].tag` (`4.7-dev1`) | Target tag for the Release. |
+| `--nuget` / `--no-nuget` | flag | No | from `[release].publish_nuget` | Push the Mono NuGet packages to GitHub Packages after the Release upload. |
+| `--nuget-overwrite` / `--no-nuget-overwrite` | flag | No | from `[release].nuget_overwrite` (`true`) | Delete an already-published NuGet id+version before pushing so the rebuilt package replaces it (needs `delete:packages`). `--no-nuget-overwrite` skips existing versions instead. |
+| `--tag` | `str` | No | derived from `version.py` (e.g. `4.7.beta`) | Target tag for the Release. One-off override for hotfix re-publishes. |
 | `--jobs` | `int` | No | `[build].build_jobs` (nproc - 2) | SCons `-j` parallelism. |
 | `--godot-repo` | `str` | No | from config | GitHub slug of the Godot source repo. |
 | `--dry-run` | flag | No | off | Print the build/package/`gh` commands without executing them. |
@@ -455,6 +518,34 @@ If you previously cloned a revision that contained
 the signing key on the Play Store / app distribution side is the
 recommended mitigation regardless of any later history-rewrite
 (`git filter-repo`) operation the operator may decide to plan separately.
+
+---
+
+## Android native debug symbols
+
+The Android `template_release` matrix is built with native debug symbols so
+crash stack traces from the Google Play Console / Firebase Crashlytics (or
+`ndk-stack` locally) can be symbolicated. Following the Godot
+[Resolving crashes on Android](https://docs.godotengine.org/en/latest/tutorials/platform/android/resolving_crashes_on_android.html)
+guide, every arch is compiled with `debug_symbols=yes` and the final arch
+(`x86_64`) additionally gets `separate_debug_symbols=yes` — that last build is
+when SCons zips the accumulated `platform/android/java/lib/libs` tree (all four
+arches) into `bin/android-template-release-native-symbols.zip`.
+
+This works because the build runs SCons manually and then invokes gradle
+(`generateGodotTemplates`) with the in-gradle SCons tasks excluded
+(`excludeSconsBuildTasks()` is true without `-PgenerateNativeLibs`), so gradle
+packages exactly the symbol-laden libs rather than recompiling them. The
+packager publishes the zip as a standalone Release asset named
+`godot-lib.<version>.template_release.native-symbols.zip`
+(`...mono.template_release...` for the Mono flavor) — it is **not** bundled in
+the `.tpz`, since it is a debugging aid, not a runtime template. Upload it to
+the Play Console alongside the matching app build, or symbolicate manually with
+the NDK's `ndk-stack`.
+
+The symbols are produced only by a fresh Android build; a partial run whose
+`out/android/` predates this is skipped with an INFO log. Delete
+`out/android/` to force a rebuild that emits them.
 
 ---
 

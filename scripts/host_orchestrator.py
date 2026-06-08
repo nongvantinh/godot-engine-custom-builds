@@ -27,8 +27,13 @@ Responsibilities:
      platform-specific deps. Env vars threaded into the container:
      ``BUILD_NAME``, ``GODOT_VERSION_STATUS``, ``NUM_CORES``, ``CLASSICAL``,
      ``MONO``. ``tee``-style log fan-out into ``out/logs/<plat>``.
-  7. Final ``chown`` — best-effort; ``PermissionError`` is non-fatal.
-  8. ``--clean-release`` / ``--cleanup`` — exposed as the ``mode`` kwarg.
+  7. ``--clean-release`` / ``--cleanup`` — exposed as the ``mode`` kwarg.
+
+The cosmetic ``chown`` of build outputs back to the invoking user is NOT done
+here. It is run by the caller (``build-godot.py``) as the very last step of the
+``release`` flow — after packaging and publishing — so that an interruption
+during the long recursive chown can never cost the expensive build/publish
+work. See :func:`_chown_outputs`.
 
 Resilience features:
 
@@ -40,9 +45,11 @@ Resilience features:
     :class:`urllib.error.URLError` does not abort the whole run; we retry
     up to 4 times with exponential backoff and a 60 s socket timeout (same
     wrapper as ``install_d3d12_sdk_windows.py`` in the build container).
-  * **``chown`` failure-safe.** :class:`PermissionError` /
-    :class:`OSError` are caught so the run exits 0 even when the host
-    filesystem refuses a chown.
+  * **``chown`` failure-safe.** The chown runs *last* (after publish) and
+    isolates every path: :class:`OSError` on any single file is counted and
+    skipped, never aborting the rest, and the function never raises. Combined
+    with run-anywhere resumability, an interruption during the chown costs
+    nothing.
   * **Tarball directory.** ``${basedir}/../upstream/`` is used as the
     intermediate tarball location and the move into ``${basedir}/`` is a
     :func:`shutil.move` that raises a clear Python error if either path is
@@ -235,7 +242,10 @@ def run_build(
                 dry_run=dry_run,
             )
 
-        _chown_outputs(basedir, dry_run=dry_run)
+        # NOTE: the cosmetic chown of out/ + mono-glue back to the invoking
+        # user is intentionally NOT done here. The caller runs it as the final
+        # step of the release flow (after packaging + publishing) so an
+        # interruption during the long recursive chown cannot cost the build.
         return 0
 
     except _HostOrchestratorError as exc:
@@ -929,10 +939,20 @@ def _run_and_tee(
 
 
 def _chown_outputs(basedir: Path, *, dry_run: bool) -> None:
-    """Best-effort chown of ``out/``, ``mono-glue/``, and ``godot*.tar.gz``.
+    """Best-effort, interruption-tolerant chown of the build outputs.
 
-    An inability to chown (no privileges; container produced files as another
-    uid; filesystem refuses) is logged and ignored.
+    Hands ``out/``, ``mono-glue/`` and ``godot*.tar.gz`` (produced as ``root``
+    by the Docker builds) back to the invoking user so the operator can manage
+    them without ``sudo``. This is purely cosmetic — every file is left
+    world-readable, so packaging never depends on it — which is why the caller
+    runs it *last*, after publishing.
+
+    Resilience: every path is chowned independently inside its own ``try`` —
+    a failure on one (a file owned by a different container uid, a vanished
+    temp file, a refusing filesystem) is counted and skipped, never aborting
+    the rest. Directory walks that error mid-stream are truncated rather than
+    propagated. The function never raises, so it can sit at the tail of the
+    release flow without risking the work that precedes it.
     """
     if dry_run:
         logger.info("[dry-run] Would chown out/, mono-glue/, and godot*.tar.gz.")
@@ -941,44 +961,47 @@ def _chown_outputs(basedir: Path, *, dry_run: bool) -> None:
     uid = os.environ.get("SUDO_UID")
     gid = os.environ.get("SUDO_GID")
     try:
-        if uid is not None:
-            uid_int = int(uid)
-        else:
-            uid_int = os.getuid()
-        if gid is not None:
-            gid_int = int(gid)
-        else:
-            gid_int = os.getgid()
+        uid_int = int(uid) if uid is not None else os.getuid()
+        gid_int = int(gid) if gid is not None else os.getgid()
     except (AttributeError, ValueError):
         logger.info("Skipping chown: cannot resolve uid/gid on this platform.")
         return
 
     targets: list[Path] = [basedir / "out", basedir / "mono-glue"]
     targets.extend(basedir.glob("godot*.tar.gz"))
+
+    failures = 0
     for target in targets:
         if not target.exists():
             continue
-        try:
-            _chown_recursive(target, uid_int, gid_int)
-        except (PermissionError, OSError) as exc:
-            # A failure on one target (e.g. files in ``out/linux/`` owned by
-            # a different container uid) must NOT short-circuit the rest of
-            # the chown loop. Log and move on so subsequent targets get a
-            # chance.
-            logger.info(
-                "Skipping chown of %s (non-fatal): %s",
-                target,
-                exc,
-            )
-            continue
+        for path in _walk_tree(target):
+            try:
+                os.chown(path, uid_int, gid_int)
+            except OSError:
+                # One unchangeable path must never short-circuit the rest.
+                failures += 1
+    if failures:
+        logger.info(
+            "chown: left %d path(s) unchanged (non-fatal — e.g. owned by a "
+            "different container uid, or this process is unprivileged).",
+            failures,
+        )
 
 
-def _chown_recursive(path: Path, uid: int, gid: int) -> None:
-    """Recursively chown *path* (file or directory) to (uid, gid)."""
-    os.chown(path, uid, gid)
-    if path.is_dir():
-        for child in path.rglob("*"):
-            os.chown(child, uid, gid)
+def _walk_tree(root: Path):
+    """Yield *root* then every descendant, swallowing mid-walk OS errors.
+
+    A directory that vanishes or denies listing partway through ends that
+    branch instead of raising; everything already yielded still gets chowned.
+    """
+    yield root
+    if not root.is_dir():
+        return
+    try:
+        for child in root.rglob("*"):
+            yield child
+    except OSError as exc:
+        logger.debug("chown walk stopped early under %s: %s", root, exc)
 
 
 # ---------------------------------------------------------------------------

@@ -797,9 +797,10 @@ class TestRunBuildEndToEnd:
         # Every platform was skipped, so no docker run.
         popen.assert_not_called()
 
-    def test_chown_failure_does_not_fail_run(self, tmp_path, caplog):
-        # When every chown raises PermissionError, the overall run still
-        # exits 0 — chown failure is non-fatal.
+    def test_run_build_does_not_chown(self, tmp_path):
+        # The cosmetic chown moved out of run_build to the tail of the release
+        # flow (after publishing) so an interruption during it can't cost the
+        # build. run_build itself must therefore never call os.chown.
         basedir, upstream = self._stage_basedir(tmp_path)
         for plat in ("linux", "windows", "android", "macos", "ios", "web"):
             _populate_platform_output(basedir / "out" / plat)
@@ -825,10 +826,7 @@ class TestRunBuildEndToEnd:
                 "scripts.host_orchestrator.subprocess.run", side_effect=fake_run
             ),
             mock.patch("scripts.host_orchestrator._download_deps"),
-            mock.patch(
-                "scripts.host_orchestrator.os.chown",
-                side_effect=PermissionError("nope"),
-            ),
+            mock.patch("scripts.host_orchestrator.os.chown") as chown,
         ):
             rc = host_orchestrator.run_build(
                 basedir=basedir,
@@ -844,6 +842,7 @@ class TestRunBuildEndToEnd:
             )
 
         assert rc == 0
+        chown.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
