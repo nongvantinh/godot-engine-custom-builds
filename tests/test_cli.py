@@ -473,6 +473,27 @@ class TestCliRelease:
         combined = result.stdout + result.stderr
         assert "gh release" not in combined
 
+    def test_release_no_nuget_skips_nuget_publish(self, tmp_path):
+        result = subprocess.run(
+            [
+                sys.executable,
+                _SCRIPT,
+                "release",
+                "--config",
+                _write_config(tmp_path),
+                "--no-upload",
+                "--no-nuget",
+                "--dry-run",
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0
+        combined = result.stdout + result.stderr
+        assert "dotnet nuget push" not in combined
+        assert "Skipping NuGet publish" in combined
+
 
 # ---------------------------------------------------------------------------
 # containers — --extract-sdks-only

@@ -180,6 +180,26 @@ auto_upload = true
 draft = false
 prerelease = true
 
+# When true, after the Release upload the `release` sub-command pushes the Mono
+# NuGet packages (GodotSharp, GodotSharpEditor, Godot.SourceGenerators,
+# Godot.NET.Sdk) to GitHub Packages with `dotnet nuget push --skip-duplicate`.
+# The token is read from GITHUB_PERSONAL_ACCESS_TOKEN (then GHCR_PAT, then
+# GITHUB_TOKEN) — any PAT with the write:packages scope. The `--no-nuget` CLI
+# flag overrides this per-run.
+publish_nuget = true
+
+# When true (default), overwrite an already-published NuGet id+version: the
+# `release` sub-command DELETEs the matching version from GitHub Packages before
+# pushing the rebuilt package (a re-push alone is rejected by GitHub Packages).
+# A version that does not exist yet is left untouched. Deleting needs the
+# delete:packages scope on the token above. Set false (or pass
+# `--no-nuget-overwrite`) to keep the published copy and skip duplicates instead.
+nuget_overwrite = true
+
+# NuGet feed to push to. Leave empty to derive the account's GitHub Packages
+# feed from `username` (https://nuget.pkg.github.com/<username>/index.json).
+# nuget_source = ""
+
 # ---------------------------------------------------------------------------
 # Signing / artefact configuration (optional section)
 # ---------------------------------------------------------------------------

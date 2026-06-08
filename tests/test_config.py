@@ -615,6 +615,10 @@ class TestReleaseSection:
         assert release["auto_upload"] is True
         assert release["prerelease"] is True
         assert release["draft"] is False
+        # NuGet publishing defaults on, with an empty source (derived from
+        # username in build-godot.py).
+        assert release["publish_nuget"] is True
+        assert release["nuget_source"] == ""
 
     def test_release_overrides_read_when_present(self, tmp_path):
         toml_file = tmp_path / "config.toml"
@@ -633,6 +637,41 @@ class TestReleaseSection:
         assert release["repo"] == "owner/repo"
         assert release["auto_upload"] is False
         assert release["prerelease"] is False
+
+    def test_nuget_overrides_read_when_present(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            _MINIMAL_VALID_TOML + "\n[release]\n"
+            "publish_nuget = false\n"
+            'nuget_source = "https://nuget.example/index.json"\n',
+        )
+        cfg = load_config(str(toml_file))
+
+        release = get_release_config(cfg)
+
+        assert release["publish_nuget"] is False
+        assert release["nuget_source"] == "https://nuget.example/index.json"
+
+    def test_raises_when_publish_nuget_not_bool(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            _MINIMAL_VALID_TOML + '\n[release]\npublish_nuget = "yes"\n',
+        )
+
+        with pytest.raises(ConfigError, match="publish_nuget"):
+            load_config(str(toml_file))
+
+    def test_raises_when_nuget_source_not_str(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        _write_toml(
+            toml_file,
+            _MINIMAL_VALID_TOML + "\n[release]\nnuget_source = true\n",
+        )
+
+        with pytest.raises(ConfigError, match="nuget_source"):
+            load_config(str(toml_file))
 
     def test_raises_when_tag_key_set_in_config(self, tmp_path):
         # The tag is derived from version.py and MUST NOT be set in config —

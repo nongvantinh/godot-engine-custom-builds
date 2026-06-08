@@ -58,12 +58,17 @@ from scripts.docker_helper import (
     pull_image,
     run_build,
 )
-from scripts.host_orchestrator import _read_version
+from scripts.host_orchestrator import _chown_outputs, _read_version
 from scripts.orchestrator import (
     PublishError,
+    collect_nupkgs,
     collect_release_assets,
+    default_nuget_source,
+    delete_nupkg_versions,
     dispatch_build,
+    nuget_token_from_env,
     package_release,
+    publish_nupkgs,
     publish_release,
 )
 from scripts.patcher import apply_patches
@@ -328,6 +333,42 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="do_upload",
         action="store_false",
         help="Stop after producing artifacts; do not publish.",
+    )
+    release_p.add_argument(
+        "--nuget",
+        dest="do_nuget",
+        action="store_true",
+        default=None,
+        help=(
+            "Push the Mono NuGet packages to GitHub Packages after the Release "
+            "upload. (default: from [release].publish_nuget)"
+        ),
+    )
+    release_p.add_argument(
+        "--no-nuget",
+        dest="do_nuget",
+        action="store_false",
+        help="Skip the GitHub Packages NuGet push.",
+    )
+    release_p.add_argument(
+        "--nuget-overwrite",
+        dest="do_nuget_overwrite",
+        action="store_true",
+        default=None,
+        help=(
+            "Delete an already-published NuGet id+version before pushing so the "
+            "rebuilt package replaces it. (default: from "
+            "[release].nuget_overwrite = true)"
+        ),
+    )
+    release_p.add_argument(
+        "--no-nuget-overwrite",
+        dest="do_nuget_overwrite",
+        action="store_false",
+        help=(
+            "Do not delete existing NuGet versions; push then skips any version "
+            "that already exists (--skip-duplicate)."
+        ),
     )
     release_p.add_argument(
         "--tag",
@@ -854,37 +895,88 @@ def cmd_release(args: argparse.Namespace) -> int:
         logger.info("Skipping package step (--no-package).")
 
     # --- Publish (gh release) ---
-    if not do_upload:
-        logger.info("Skipping publish step (--no-upload / auto_upload=false).")
-        return 0
+    if do_upload:
+        release_dir = _BUILD_AND_TEMPLATES_DIR / "releases" / binaries_version
+        assets = collect_release_assets(release_dir)
+        if args.dry_run and not assets:
+            # In dry-run the build/package did not actually create files; show the
+            # intended publish command against the expected release dir.
+            logger.info(
+                "[dry-run] Release dir would be: %s (assets collected at publish time).",
+                release_dir,
+            )
+            # Representative real asset path (editor zip) so the printed `gh release`
+            # command mirrors a true publish rather than a literal placeholder.
+            assets = [release_dir / f"Godot_v{binaries_version}_linux.x86_64.zip"]
 
-    release_dir = _BUILD_AND_TEMPLATES_DIR / "releases" / binaries_version
-    assets = collect_release_assets(release_dir)
-    if args.dry_run and not assets:
-        # In dry-run the build/package did not actually create files; show the
-        # intended publish command against the expected release dir.
+        try:
+            publish_release(
+                tag=tag,
+                repo=repo,
+                assets=assets,
+                prerelease=release_cfg["prerelease"],
+                draft=release_cfg["draft"],
+                dry_run=args.dry_run,
+            )
+        except PublishError as exc:
+            logger.error("Release publish failed: %s", exc)
+            return 5
+
+        logger.info("Release '%s' published to %s.", tag, repo)
+    else:
+        logger.info("Skipping release upload step (--no-upload / auto_upload=false).")
+
+    # --- Publish (GitHub Packages NuGet) ---
+    # The Mono build emits the managed packages (GodotSharp, GodotSharpEditor,
+    # Godot.SourceGenerators, Godot.NET.Sdk) into every tools-mono/ dir but
+    # nothing pushed them to the NuGet feed — they only ever rode along inside
+    # the editor zip. Publish one canonical copy of each here so downstream
+    # projects can restore them via `dotnet add package`.
+    do_nuget = (
+        args.do_nuget if args.do_nuget is not None else release_cfg["publish_nuget"]
+    )
+    if do_nuget:
+        nuget_source = release_cfg["nuget_source"] or default_nuget_source(
+            config["username"]
+        )
+        nupkgs = collect_nupkgs(_BUILD_AND_TEMPLATES_DIR / "out")
+        do_nuget_overwrite = (
+            args.do_nuget_overwrite
+            if args.do_nuget_overwrite is not None
+            else release_cfg["nuget_overwrite"]
+        )
+        nuget_api_key = nuget_token_from_env() or ""
+        try:
+            # GitHub Packages refuses to re-push an existing id+version, so
+            # overwrite first deletes the published version (no-op if absent),
+            # then the push lands the freshly built copy.
+            if do_nuget_overwrite:
+                delete_nupkg_versions(
+                    nupkgs=nupkgs,
+                    username=config["username"],
+                    api_key=nuget_api_key,
+                    dry_run=args.dry_run,
+                )
+            publish_nupkgs(
+                nupkgs=nupkgs,
+                source=nuget_source,
+                api_key=nuget_api_key,
+                dry_run=args.dry_run,
+            )
+        except PublishError as exc:
+            logger.error("NuGet publish failed: %s", exc)
+            return 5
+    else:
         logger.info(
-            "[dry-run] Release dir would be: %s (assets collected at publish time).",
-            release_dir,
+            "Skipping NuGet publish step (--no-nuget / publish_nuget=false)."
         )
-        # Representative real asset path (editor zip) so the printed `gh release`
-        # command mirrors a true publish rather than a literal placeholder.
-        assets = [release_dir / f"Godot_v{binaries_version}_linux.x86_64.zip"]
 
-    try:
-        publish_release(
-            tag=tag,
-            repo=repo,
-            assets=assets,
-            prerelease=release_cfg["prerelease"],
-            draft=release_cfg["draft"],
-            dry_run=args.dry_run,
-        )
-    except PublishError as exc:
-        logger.error("Release publish failed: %s", exc)
-        return 5
+    # Cosmetic cleanup, run LAST: hand the Docker-produced (root-owned) build
+    # outputs back to the invoking user. Deliberately after packaging +
+    # publishing — it recursively chowns many GB, and an interruption here must
+    # not cost the build/publish work that already succeeded. It never raises.
+    _chown_outputs(_BUILD_AND_TEMPLATES_DIR, dry_run=args.dry_run)
 
-    logger.info("Release '%s' published to %s.", tag, repo)
     return 0
 
 

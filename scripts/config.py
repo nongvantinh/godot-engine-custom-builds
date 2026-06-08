@@ -79,6 +79,19 @@ DEFAULT_RELEASE_REPO = "nongvantinh/godot-build-scripts"
 DEFAULT_RELEASE_AUTO_UPLOAD = True
 DEFAULT_RELEASE_DRAFT = False
 DEFAULT_RELEASE_PRERELEASE = True
+# Publish the Mono NuGet packages (GodotSharp, GodotSharpEditor,
+# Godot.SourceGenerators, Godot.NET.Sdk) to GitHub Packages after the Release
+# upload. The feed URL defaults to the account's GitHub Packages NuGet feed
+# (derived from ``username``) when ``[release].nuget_source`` is unset.
+DEFAULT_RELEASE_PUBLISH_NUGET = True
+# Overwrite an already-published NuGet version instead of skipping it. GitHub
+# Packages rejects re-pushing an existing id+version, so an "overwrite" first
+# DELETEs the matching version (needs a ``delete:packages`` token) and then
+# pushes the freshly built package. ON by default: a `release` rebuilds the same
+# id+version, so the intent is always to replace the published copy rather than
+# silently keep the stale one. Disable with ``--no-nuget-overwrite`` /
+# ``[release].nuget_overwrite = false`` (push then skips existing versions).
+DEFAULT_RELEASE_NUGET_OVERWRITE = True
 
 # Source defaults.
 DEFAULT_GIT_BRANCH = "4.7.dev1"
@@ -251,9 +264,17 @@ def _check_release_section(config: dict, path: str) -> None:
         )
     if "repo" in release and not isinstance(release["repo"], str):
         raise ConfigError(f"[release].repo in {path} must be a string.")
-    for key in ("auto_upload", "draft", "prerelease"):
+    for key in (
+        "auto_upload",
+        "draft",
+        "prerelease",
+        "publish_nuget",
+        "nuget_overwrite",
+    ):
         if key in release and not isinstance(release[key], bool):
             raise ConfigError(f"[release].{key} in {path} must be a boolean.")
+    if "nuget_source" in release and not isinstance(release["nuget_source"], str):
+        raise ConfigError(f"[release].nuget_source in {path} must be a string.")
 
 
 # ---------------------------------------------------------------------------
@@ -322,4 +343,12 @@ def get_release_config(config: dict) -> dict:
         "auto_upload": release.get("auto_upload", DEFAULT_RELEASE_AUTO_UPLOAD),
         "draft": release.get("draft", DEFAULT_RELEASE_DRAFT),
         "prerelease": release.get("prerelease", DEFAULT_RELEASE_PRERELEASE),
+        "publish_nuget": release.get(
+            "publish_nuget", DEFAULT_RELEASE_PUBLISH_NUGET
+        ),
+        "nuget_overwrite": release.get(
+            "nuget_overwrite", DEFAULT_RELEASE_NUGET_OVERWRITE
+        ),
+        # When unset, build-godot.py derives the feed from ``username``.
+        "nuget_source": release.get("nuget_source", ""),
     }
