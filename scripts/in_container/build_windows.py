@@ -1,8 +1,10 @@
 """In-container entry point for the Windows build container.
 
 Builds Windows editor + templates (classical + Mono) across three archs
-(x86_64, x86_32, arm64) using llvm-mingw. arm64 is best-effort (known
-prebuilt-ANGLE link clash).
+(x86_64, x86_32, arm64). x86 uses mingw; arm64 uses llvm-mingw. arm64 is a
+first-class target — the ANGLE version the engine pins (chromium/7219, fetched
+host-side by the orchestrator) resolved the old libc++ symbol clash that
+previously made it best-effort.
 
 Env contract:
 
@@ -22,9 +24,8 @@ Gaps already in bash, replicated here:
     timeout × 4 attempts; failure is fatal.
   * ``copy_and_clean_bin`` preserves ``bin/build_deps/`` so the D3D12 deps
     survive across arch cycles.
-  * arm64 classical + Mono blocks use ``check=False`` (bash ``set +e``); a
-    failure logs WARNING and the script keeps going so x86_64/x86_32 outputs
-    still publish.
+  * arm64 builds are first-class (``check=True`` like x86): a failure aborts
+    the Windows build rather than being swallowed.
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ _OPTIONS: tuple[str, ...] = (
     "accesskit_sdk_path=/root/accesskit/accesskit-c",
     "use_mingw=yes",
     "angle_libs=/root/angle",
+    "winrt_path=/root/winrt",
     "d3d12=yes",
 )
 _OPTIONS_MONO: tuple[str, ...] = (
@@ -70,7 +72,8 @@ def _scons_chain(
     """Run scons once per target with the shared OPTIONS+extra prefix.
 
     Returns True iff every invocation exits 0. With ``check=False`` we stop at
-    the first failure and return False — used for the arm64 best-effort blocks.
+    the first failure and return False (``check=True``, the default, lets
+    ``run_scons`` raise so a failure aborts the build).
     """
     for target in targets:
         rc = common.run_scons(
@@ -155,34 +158,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             common.copy_and_clean_bin(bin_dir, out_root / "x86_32" / "templates")
 
-            # arm64 — best-effort (known prebuilt-ANGLE link clash).
-            arm64_ok = _scons_chain(
+            # arm64 (llvm-mingw). First-class since ANGLE chromium/7219 — the
+            # rebuild the engine pins — resolves the old libc++ symbol clash
+            # that made 6601.2 fail to link against llvm-mingw.
+            _scons_chain(
                 godot_dir,
                 arch="arm64",
                 extra=_OPTIONS_LLVM,
                 targets=("editor",),
                 num_cores=num_cores,
                 env=env,
-                check=False,
             )
-            if arm64_ok:
-                common.copy_and_clean_bin(bin_dir, out_root / "arm64" / "tools")
-                arm64_ok = _scons_chain(
-                    godot_dir,
-                    arch="arm64",
-                    extra=_OPTIONS_LLVM,
-                    targets=("template_debug", "template_release"),
-                    num_cores=num_cores,
-                    env=env,
-                    check=False,
-                )
-                if arm64_ok:
-                    common.copy_and_clean_bin(bin_dir, out_root / "arm64" / "templates")
-            if not arm64_ok:
-                logger.warning(
-                    "arm64 classical Windows build failed (known prebuilt-ANGLE link clash); "
-                    "continuing with x86_64/x86_32 + Mono builds."
-                )
+            common.copy_and_clean_bin(bin_dir, out_root / "arm64" / "tools")
+            _scons_chain(
+                godot_dir,
+                arch="arm64",
+                extra=_OPTIONS_LLVM,
+                targets=("template_debug", "template_release"),
+                num_cores=num_cores,
+                env=env,
+            )
+            common.copy_and_clean_bin(bin_dir, out_root / "arm64" / "templates")
 
             # Always cleanup bin/ (preserve build_deps) so Mono pass starts clean.
             common.clean_bin_preserving(bin_dir)

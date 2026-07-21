@@ -37,6 +37,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from scripts.console import summary_table
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,7 +64,7 @@ def package_release(
         ``build-godot-and-templates/`` — directory holding ``out/``,
         ``releases/``, ``deps/``, etc.
     godot_version
-        Engine version, e.g. ``"4.7"``.
+        Engine version, e.g. ``"4.8"``.
     godot_version_status
         Pre-release status tail, e.g. ``"dev1"``. The binaries version is
         ``<godot_version>-<godot_version_status>``; the templates version is
@@ -90,12 +92,12 @@ def package_release(
     del build_cfg  # accepted for forward compatibility; unused today.
 
     # Single source of truth — ``<godot_version>.<godot_version_status>`` (e.g.
-    # ``4.7.beta``) comes from upstream/godot/version.py and drives BOTH the
+    # ``4.8.beta``) comes from upstream/godot/version.py and drives BOTH the
     # published filename pattern AND ``version.txt`` inside the .tpz. Godot
     # looks templates up by ``version.txt`` at install time, so the install
     # path on the user's machine matches the engine binary's reported version
     # exactly. Diverging filenames from the engine version was the historical
-    # source of "templates installed at 4.7.dev1 but engine reports 4.7.beta"
+    # source of "templates installed at 4.8.dev1 but engine reports 4.8.beta"
     # bugs — this layout makes the mismatch impossible.
     binaries_version = f"{godot_version}.{godot_version_status}"
     templates_version = binaries_version
@@ -170,7 +172,30 @@ def package_release(
     _generate_sha512sums(release_dir_mono, recurse_mono=False)
 
     logger.info("Packaging complete: %s", release_dir)
+    _print_release_artifacts_table(release_dir)
     return 0
+
+
+def _human_size(num_bytes: int) -> str:
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
+def _print_release_artifacts_table(release_dir: Path) -> None:
+    """Print every file staged under *release_dir* (classical + mono) with
+    its size, so operators can see at a glance what packaging produced."""
+    files = sorted(p for p in release_dir.rglob("*") if p.is_file())
+    if not files:
+        return
+    rows = [
+        (str(p.relative_to(release_dir)), _human_size(p.stat().st_size))
+        for p in files
+    ]
+    summary_table(f"Packaged artifacts — {release_dir.name}", ["File", "Size"], rows)
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +212,39 @@ class _ArchSpec:
     artifact_patterns: tuple[str, ...]
 
 
-_LINUX_ARCHS = ("x86_64", "x86_32", "arm64", "arm32")
-_WINDOWS_ARCHS = ("x86_64", "x86_32", "arm64")
+def _discover_archs(platform_out: Path) -> list[str]:
+    """Return the arch names actually built under ``out/<platform>/``, sorted.
+
+    Packaging discovers what the build produced rather than iterating a
+    hardcoded arch list: it stays correct as config selects different arch
+    subsets (e.g. a Linux-x86_64-only Release) and never needs editing when an
+    arch is added or dropped. Missing/partial per-arch artifacts are still
+    skipped by the ``_have_real_artifacts`` guards downstream.
+    """
+    if not platform_out.is_dir():
+        return []
+    return sorted(p.name for p in platform_out.iterdir() if p.is_dir())
+
+
+# Windows arches built with the LLVM/MinGW toolchain (use_llvm=yes) — Godot
+# appends a ".llvm" infix to the SCons output name for these, e.g.
+# godot.windows.editor.arm64.llvm.exe. This MUST stay in sync with
+# scripts/in_container/build_windows.py, which applies _OPTIONS_LLVM to arm64
+# only (x86_64/x86_32 use plain gcc-mingw and carry no infix).
+_WINDOWS_LLVM_ARCHS: frozenset[str] = frozenset({"arm64"})
+
+
+def _windows_bin_infix(arch: str) -> str:
+    """Return the toolchain infix in the Windows SCons binary name for *arch*.
+
+    ``.llvm`` for llvm-mingw arches (arm64), ``""`` otherwise. The infix sits
+    between the arch and any ``.mono``/``.console`` parts:
+    ``godot.windows.<target>.<arch>[.llvm][.mono][.console].exe``. It is only
+    part of the *source* filename read from ``out/`` — the published asset name
+    stays toolchain-agnostic (``winarm64``), so callers apply the infix to the
+    lookup pattern but never to the output name.
+    """
+    return ".llvm" if arch in _WINDOWS_LLVM_ARCHS else ""
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +259,7 @@ def _package_linux_classical(
     godot_basename: str,
 ) -> None:
     logger.info("Packaging Linux (classical)...")
-    for arch in _LINUX_ARCHS:
+    for arch in _discover_archs(out_dir / "linux"):
         tools_dir = out_dir / "linux" / arch / "tools"
         templates_src = out_dir / "linux" / arch / "templates"
 
@@ -256,7 +312,7 @@ def _package_linux_mono(
     godot_basename: str,
 ) -> None:
     logger.info("Packaging Linux (mono)...")
-    for arch in _LINUX_ARCHS:
+    for arch in _discover_archs(out_dir / "linux"):
         tools_dir = out_dir / "linux" / arch / "tools-mono"
         templates_src = out_dir / "linux" / arch / "templates-mono"
 
@@ -319,18 +375,19 @@ def _package_windows_classical(
     godot_basename: str,
 ) -> None:
     logger.info("Packaging Windows (classical)...")
-    for arch in _WINDOWS_ARCHS:
+    for arch in _discover_archs(out_dir / "windows"):
+        infix = _windows_bin_infix(arch)
         tools_dir = out_dir / "windows" / arch / "tools"
         templates_src = out_dir / "windows" / arch / "templates"
 
-        editor_exe = tools_dir / f"godot.windows.editor.{arch}.exe"
-        console_exe = tools_dir / f"godot.windows.editor.{arch}.console.exe"
+        editor_exe = tools_dir / f"godot.windows.editor.{arch}{infix}.exe"
+        console_exe = tools_dir / f"godot.windows.editor.{arch}{infix}.console.exe"
         if (
             _have_real_artifacts(
                 tools_dir,
                 (
-                    f"godot.windows.editor.{arch}.exe",
-                    f"godot.windows.editor.{arch}.console.exe",
+                    f"godot.windows.editor.{arch}{infix}.exe",
+                    f"godot.windows.editor.{arch}{infix}.console.exe",
                 ),
                 require_all=False,
             )
@@ -355,8 +412,8 @@ def _package_windows_classical(
         if _have_real_artifacts(
             templates_src,
             (
-                f"godot.windows.template_release.{arch}.exe",
-                f"godot.windows.template_debug.{arch}.exe",
+                f"godot.windows.template_release.{arch}{infix}.exe",
+                f"godot.windows.template_debug.{arch}{infix}.exe",
             ),
             require_all=False,
         ):
@@ -367,7 +424,7 @@ def _package_windows_classical(
                 ):
                     src = (
                         templates_src
-                        / f"godot.windows.template_{variant}.{arch}{suffix}.exe"
+                        / f"godot.windows.template_{variant}.{arch}{infix}{suffix}.exe"
                     )
                     if src.is_file():
                         dest = templates_dir / f"windows_{variant}_{out_suffix}.exe"
@@ -387,17 +444,20 @@ def _package_windows_mono(
     godot_basename: str,
 ) -> None:
     logger.info("Packaging Windows (mono)...")
-    for arch in _WINDOWS_ARCHS:
+    for arch in _discover_archs(out_dir / "windows"):
+        infix = _windows_bin_infix(arch)
         tools_dir = out_dir / "windows" / arch / "tools-mono"
         templates_src = out_dir / "windows" / arch / "templates-mono"
 
-        editor_exe = tools_dir / f"godot.windows.editor.{arch}.mono.exe"
-        console_exe = tools_dir / f"godot.windows.editor.{arch}.mono.console.exe"
+        editor_exe = tools_dir / f"godot.windows.editor.{arch}{infix}.mono.exe"
+        console_exe = tools_dir / f"godot.windows.editor.{arch}{infix}.mono.console.exe"
         sharp_dir = tools_dir / "GodotSharp"
         # Gap 3: a half-built arm64 mono run left this dir empty / partial. Skip
         # rather than zip a 210-byte stub.
         if (
-            _have_real_artifacts(tools_dir, (f"godot.windows.editor.{arch}.mono.exe",))
+            _have_real_artifacts(
+                tools_dir, (f"godot.windows.editor.{arch}{infix}.mono.exe",)
+            )
             and editor_exe.is_file()
             and sharp_dir.is_dir()
         ):
@@ -425,8 +485,8 @@ def _package_windows_mono(
         if _have_real_artifacts(
             templates_src,
             (
-                f"godot.windows.template_release.{arch}.mono.exe",
-                f"godot.windows.template_debug.{arch}.mono.exe",
+                f"godot.windows.template_release.{arch}{infix}.mono.exe",
+                f"godot.windows.template_debug.{arch}{infix}.mono.exe",
             ),
             require_all=False,
         ):
@@ -437,7 +497,7 @@ def _package_windows_mono(
                 ):
                     src = (
                         templates_src
-                        / f"godot.windows.template_{variant}.{arch}.mono{suffix}.exe"
+                        / f"godot.windows.template_{variant}.{arch}{infix}.mono{suffix}.exe"
                     )
                     if src.is_file():
                         dest = (
@@ -719,11 +779,14 @@ def _package_android_classical(
         mono=False,
     )
 
-    # Editor APKs / AAB (best-effort)
+    # Editor APK / AAB (standard + HorizonOS + PicoOS) and the editor native
+    # debug symbols. Best-effort: a missing artifact is skipped, not fatal.
     for editor in (
         "android_editor.apk",
-        "android_editor_horizonos.apk",
         "android_editor.aab",
+        "android_editor_horizonos.apk",
+        "android_editor_picoos.apk",
+        "android_editor_native_debug_symbols.zip",
     ):
         src = tools_src / editor
         if src.is_file():
@@ -833,7 +896,7 @@ def _find_ios_xcode_dir(upstream_godot_dir: Path) -> Path | None:
     """Locate the iOS xcode template dir under the upstream submodule.
 
     Accepts both the legacy ``ios_xcode`` name and the current upstream
-    ``apple_embedded_xcode`` name (4.7 upstream renamed the directory). Returns
+    ``apple_embedded_xcode`` name (4.8 upstream renamed the directory). Returns
     ``None`` if neither is present.
     """
     for name in ("ios_xcode", "apple_embedded_xcode"):

@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -73,6 +74,9 @@ import zipfile
 from pathlib import Path
 from typing import Literal
 
+from scripts import platforms
+from scripts.console import section, spinner, summary_table
+
 logger = logging.getLogger(__name__)
 
 
@@ -80,31 +84,29 @@ logger = logging.getLogger(__name__)
 # Constants — dependency download URLs (one per ``download_*`` helper below)
 # ---------------------------------------------------------------------------
 
+# Dependency versions are the ENGINE's single source of truth. Rather than
+# hardcode (and inevitably drift from) each version, we read it at run time
+# from the engine's own ``misc/scripts/install_*.py`` pins — see
+# :func:`_engine_install_version`. This is the same principle the Windows
+# Mesa/D3D12 path already follows by running ``install_d3d12_sdk_windows.py``
+# in-container. Only MoltenVK has no engine installer, so it stays pinned here.
 _MOLTENVK_URL = (
     "https://github.com/godotengine/moltenvk-osxcross/releases/download/"
     "vulkan-sdk-1.3.283.0-2/MoltenVK-all.tar"
 )
 
-_ACCESSKIT_URL = (
-    "https://github.com/godotengine/godot-accesskit-c-static/releases/download/"
-    "0.21.2/accesskit-c-0.21.2.zip"
-)
-
-_ANGLE_BASE_URL = (
-    "https://github.com/godotengine/godot-angle-static/releases/download/"
-    "chromium%2F6601.2/godot-angle-static"
-)
-_ANGLE_ARCHIVES: tuple[tuple[str, str], ...] = (
-    ("windows_arm64.zip", f"{_ANGLE_BASE_URL}-arm64-llvm-release.zip"),
-    ("windows_x86_64.zip", f"{_ANGLE_BASE_URL}-x86_64-gcc-release.zip"),
-    ("windows_x86_32.zip", f"{_ANGLE_BASE_URL}-x86_32-gcc-release.zip"),
-    ("macos_arm64.zip", f"{_ANGLE_BASE_URL}-arm64-macos-release.zip"),
-    ("macos_x86_64.zip", f"{_ANGLE_BASE_URL}-x86_64-macos-release.zip"),
-)
-
-_SWAPPY_URL = (
-    "https://github.com/godotengine/godot-swappy/releases/download/"
-    "from-source-2025-01-31/godot-swappy.7z"
+# ANGLE per-arch bundle variants (arch/toolchain suffix is stable across
+# versions; only the release tag moves, and that comes from the engine). The
+# engine links arch-tagged lib names (``libANGLE.windows.<arch>.a``) so all
+# variants can share the flat ``/root/angle`` dir — matching upstream
+# godot-build-scripts. Windows x86 uses the gcc/mingw variant; arm64 uses the
+# llvm variant (built with llvm-mingw).
+_ANGLE_ARCH_VARIANTS: tuple[tuple[str, str], ...] = (
+    ("windows_arm64.zip", "arm64-llvm"),
+    ("windows_x86_64.zip", "x86_64-gcc"),
+    ("windows_x86_32.zip", "x86_32-gcc"),
+    ("macos_arm64.zip", "arm64-macos"),
+    ("macos_x86_64.zip", "x86_64-macos"),
 )
 
 
@@ -127,6 +129,8 @@ def run_build(
     upstream_godot_dir: Path,
     build_type: str,
     num_cores: int,
+    platforms: list[str] | None = None,
+    build_archs: list[str] | None = None,
     skip_download_containers: bool = False,
     build_name: str = "",
     version_status_patch: str = "",
@@ -138,6 +142,14 @@ def run_build(
     *godot_repo* is accepted for caller convenience but is not used by the
     build flow itself — the engine source is always the local
     ``upstream_godot_dir`` submodule.
+
+    *platforms* scopes the run to a subset of the six supported platforms
+    (``None`` = all). Only the scoped platforms' images are acquired and only
+    their per-platform build passes run; packaging/publishing downstream still
+    reflect the union of everything present in ``out/`` (resumability keeps
+    previously built platforms), so a scoped run adds to a Release rather than
+    replacing it. *build_archs* (``None`` = every arch the container supports)
+    restricts the in-container arch matrix via the ``GODOT_BUILD_ARCHS`` env.
 
     Returns 0 on success, non-zero on a hard error.
     """
@@ -163,13 +175,34 @@ def run_build(
 
     images = _resolve_image_names(registry, username, container_version)
 
+    # Normalize the platform scope (None = all six). Validate up front so a
+    # typo fails loud instead of silently building nothing.
+    scope: set[str] | None
+    if platforms is None:
+        scope = None
+    else:
+        scope = {p.strip().lower() for p in platforms if p.strip()}
+        unknown = scope - set(images)
+        if unknown:
+            logger.error(
+                "Unknown platform(s) %s. Supported: %s.",
+                ", ".join(sorted(unknown)),
+                ", ".join(sorted(images)),
+            )
+            return 1
+    logger.info(
+        "  platforms=%s build_archs=%s",
+        "all" if scope is None else ",".join(sorted(scope)),
+        "all" if not build_archs else ",".join(build_archs),
+    )
+
     try:
         if not skip_download_containers:
-            _pull_images(images, dry_run=dry_run)
+            _pull_images(images, platforms=scope, dry_run=dry_run)
         else:
             logger.info("Skipping `docker pull` (skip_download_containers=True).")
 
-        _download_deps(basedir, dry_run=dry_run)
+        _download_deps(basedir, upstream_godot_dir, dry_run=dry_run)
         godot_version, godot_version_status = _prepare_source(
             basedir=basedir,
             upstream_godot_dir=upstream_godot_dir,
@@ -194,6 +227,10 @@ def run_build(
             "CLASSICAL": "1" if build_classical else "0",
             "MONO": "1" if build_mono else "0",
         }
+        # Restrict the in-container arch matrix when requested. Unset (empty)
+        # means "every arch the container supports" — the historical default.
+        if build_archs:
+            common_env["GODOT_BUILD_ARCHS"] = ",".join(build_archs)
         tarball_path = basedir / f"godot-{godot_version}.tar.gz"
 
         # --- Mono glue ---
@@ -203,6 +240,11 @@ def run_build(
                 mono_glue_dir,
             )
         else:
+            # Mono glue is generated with the Linux image. When the run is
+            # scoped to a non-Linux platform the Linux image was not pulled
+            # above, so make sure it is available before the glue pass.
+            if not skip_download_containers and (scope is not None and "linux" not in scope):
+                _ensure_image_available(images["linux"], "linux", dry_run=dry_run)
             _run_build_mono_glue(
                 basedir=basedir,
                 linux_image=images["linux"],
@@ -214,10 +256,13 @@ def run_build(
             )
 
         # --- Per-platform ---
+        platform_results: list[tuple[str, str, str]] = []
         for plat, image, extra_mounts, extra_env in _iter_platforms(
             basedir=basedir,
             images=images,
         ):
+            if scope is not None and plat not in scope:
+                continue
             out_plat = out_dir / plat
             if not dry_run:
                 out_plat.mkdir(parents=True, exist_ok=True)
@@ -228,7 +273,10 @@ def run_build(
                     plat,
                     out_plat,
                 )
+                platform_results.append((plat, "skipped", "-"))
                 continue
+            section(f"Building platform: {plat}", image)
+            started = time.monotonic()
             _run_build_platform(
                 name=plat,
                 image=image,
@@ -241,6 +289,15 @@ def run_build(
                 extra_mounts=extra_mounts,
                 dry_run=dry_run,
             )
+            elapsed = "-" if dry_run else f"{time.monotonic() - started:.1f}s"
+            platform_results.append((plat, "dry-run" if dry_run else "ok", elapsed))
+
+        summary_table(
+            "Build matrix summary",
+            ["Platform", "Status", "Elapsed"],
+            platform_results,
+            status_column=1,
+        )
 
         # NOTE: the cosmetic chown of out/ + mono-glue back to the invoking
         # user is intentionally NOT done here. The caller runs it as the final
@@ -270,34 +327,59 @@ class _HostOrchestratorError(RuntimeError):
 def _resolve_image_names(
     registry: str, username: str, container_version: str
 ) -> dict[str, str]:
-    """Resolve the 6 platform images per config (no BASE_DISTRO suffix).
+    """Resolve the container image ref for every platform in the registry.
 
-    Tags resolve as ``${registry}/${username}/godot-<plat>:${container_version}``
-    and MUST match what ``containers --push`` produces and what config.toml
-    declares.
+    Derived from :mod:`scripts.platforms` (the single source of truth for
+    image basenames) so the tags MUST match what ``containers --push``
+    produces and what config.toml declares.
     """
     return {
-        "windows": f"{registry}/{username}/godot-windows:{container_version}",
-        "linux": f"{registry}/{username}/godot-linux:{container_version}",
-        "web": f"{registry}/{username}/godot-web:{container_version}",
-        "macos": f"{registry}/{username}/godot-osx:{container_version}",
-        "android": f"{registry}/{username}/godot-android:{container_version}",
-        "ios": f"{registry}/{username}/godot-ios:{container_version}",
+        name: platforms.image_ref(name, registry, username, container_version)
+        for name in platforms.release_order()
     }
 
 
-def _pull_images(images: dict[str, str], *, dry_run: bool) -> None:
-    logger.info("Fetching images from GitHub Container Registry...")
+def _image_present_locally(image: str) -> bool:
+    """Return ``True`` if *image* already exists in the local Docker store."""
+    result = subprocess.run(
+        ["docker", "image", "inspect", image],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
+def _ensure_image_available(image: str, plat: str, *, dry_run: bool) -> None:
+    """Make *image* available locally, pulling from the registry only if absent.
+
+    A locally present image is used as-is (no pull) so an operator can build
+    against a locally built or retagged image that is not published to the
+    registry — the common case when preparing the first Release of a new
+    version before the images have been pushed. Only a genuinely missing image
+    triggers a ``docker pull``; a failed pull is a hard error.
+    """
+    if dry_run:
+        logger.info("[dry-run] Would ensure image %s (%s) is available", image, plat)
+        return
+    if _image_present_locally(image):
+        logger.info("Using local image %s (%s); skipping pull.", image, plat)
+        return
+    logger.info("Pulling image: %s", image)
+    result = subprocess.run(["docker", "pull", image])
+    if result.returncode != 0:
+        raise _HostOrchestratorError(
+            f"`docker pull {image}` exited with code {result.returncode}."
+        )
+
+
+def _pull_images(
+    images: dict[str, str], *, platforms: set[str] | None = None, dry_run: bool
+) -> None:
+    logger.info("Fetching container images...")
     for plat, image in images.items():
-        if dry_run:
-            logger.info("[dry-run] Would `docker pull %s` (%s)", image, plat)
+        if platforms is not None and plat not in platforms:
             continue
-        logger.info("Pulling image: %s", image)
-        result = subprocess.run(["docker", "pull", image])
-        if result.returncode != 0:
-            raise _HostOrchestratorError(
-                f"`docker pull {image}` exited with code {result.returncode}."
-            )
+        _ensure_image_available(image, plat, dry_run=dry_run)
 
 
 # ---------------------------------------------------------------------------
@@ -305,36 +387,97 @@ def _pull_images(images: dict[str, str], *, dry_run: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _download_deps(basedir: Path, *, dry_run: bool) -> None:
+def _engine_install_version(
+    upstream_godot_dir: Path, script_name: str, var_name: str
+) -> str:
+    """Read a version pin from the engine's ``misc/scripts/<script_name>``.
+
+    The engine's ``install_*.py`` scripts are the single source of truth for
+    the exact dependency versions Godot expects (e.g. ``angle_version``,
+    ``ac_version``, ``winrt_version``). We parse the literal ``<var> = "..."``
+    assignment out of the script rather than maintain a parallel, drift-prone
+    copy here. Fails loud if the script or the variable is missing so a
+    structural upstream change surfaces immediately instead of silently
+    falling back to a stale value.
+    """
+    script = upstream_godot_dir / "misc" / "scripts" / script_name
+    if not script.is_file():
+        raise _HostOrchestratorError(
+            f"Engine dependency pin script not found: {script}. Cannot resolve "
+            f"{var_name} — the Godot submodule may be missing or restructured."
+        )
+    text = script.read_text(encoding="utf-8")
+    match = re.search(
+        rf"^\s*{re.escape(var_name)}\s*=\s*[\"']([^\"']+)[\"']", text, re.MULTILINE
+    )
+    if not match:
+        raise _HostOrchestratorError(
+            f"Could not find `{var_name}` in {script}. The engine may have "
+            f"renamed or restructured the pin; update _engine_install_version "
+            f"callers to match."
+        )
+    return match.group(1)
+
+
+def _dep_marker_current(target: Path, version: str) -> bool:
+    """Return True iff *target* was last populated for this exact *version*.
+
+    A ``.dep-version`` marker makes the resumability cache version-aware: a
+    bump to the engine's pinned version invalidates a stale local copy and
+    forces a fresh download instead of silently reusing the old one.
+    """
+    marker = target / ".dep-version"
+    return marker.is_file() and marker.read_text(encoding="utf-8").strip() == version
+
+
+def _write_dep_marker(target: Path, version: str) -> None:
+    (target / ".dep-version").write_text(version, encoding="utf-8")
+
+
+def _download_deps(basedir: Path, upstream_godot_dir: Path, *, dry_run: bool) -> None:
     deps = basedir / "deps"
     if not dry_run:
         deps.mkdir(parents=True, exist_ok=True)
     logger.info("Downloading dependencies into %s", deps)
-    _download_accesskit(deps, dry_run=dry_run)
+    _download_accesskit(deps, upstream_godot_dir, dry_run=dry_run)
     _download_moltenvk(deps, dry_run=dry_run)
-    _download_angle(deps, dry_run=dry_run)
+    _download_angle(deps, upstream_godot_dir, dry_run=dry_run)
+    _download_winrt(deps, upstream_godot_dir, dry_run=dry_run)
     # NOTE: Mesa NIR is intentionally NOT fetched host-side. The Windows
     # container's ``install_d3d12_sdk_windows.py --mingw_prefix`` step
-    # installs the current Mesa NIR build (25.3.1-2) into
-    # ``bin/build_deps/mesa-*`` at SCons time, so a separate host-side
-    # download is redundant and forces a stale version on every build.
-    _download_swappy(deps, dry_run=dry_run)
+    # installs the Mesa NIR build the engine pins into ``bin/build_deps/mesa-*``
+    # at SCons time (same single-source-of-truth principle), so a separate
+    # host-side download is redundant and would force a stale version.
+    _download_swappy(deps, upstream_godot_dir, dry_run=dry_run)
     _prepare_android_sign_keystore(deps, dry_run=dry_run)
 
 
-def _download_accesskit(deps_root: Path, *, dry_run: bool) -> None:
+def _download_accesskit(
+    deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool
+) -> None:
+    version = _engine_install_version(
+        upstream_godot_dir, "install_accesskit.py", "ac_version"
+    )
+    url = (
+        "https://github.com/godotengine/godot-accesskit-c-static/releases/"
+        f"download/{version}/accesskit-c-{version}.zip"
+    )
     target = deps_root / "accesskit"
     sentinel = target / "accesskit-c"  # post-extract dir
-    if sentinel.is_dir():
-        logger.info("AccessKit already present at %s; skipping download.", sentinel)
+    if sentinel.is_dir() and _dep_marker_current(target, version):
+        logger.info(
+            "AccessKit %s already present at %s; skipping download.", version, sentinel
+        )
         return
-    logger.info("Missing AccessKit C SDK, downloading it.")
+    logger.info("Fetching AccessKit C SDK %s (engine-pinned).", version)
     if dry_run:
-        logger.info("[dry-run] Would download %s into %s", _ACCESSKIT_URL, target)
+        logger.info("[dry-run] Would download %s into %s", url, target)
         return
+    if sentinel.is_dir():
+        shutil.rmtree(sentinel)  # stale version -> replace
     target.mkdir(parents=True, exist_ok=True)
     archive = target / "accesskit.zip"
-    _download_with_retry(_ACCESSKIT_URL, archive)
+    _download_with_retry(url, archive)
     _extract(archive, target)
     archive.unlink(missing_ok=True)
     # The zip extracts to `accesskit-c-<version>/`; rename to a stable name.
@@ -342,6 +485,7 @@ def _download_accesskit(deps_root: Path, *, dry_run: bool) -> None:
         if child.is_dir() and child.name.startswith("accesskit-c-"):
             child.rename(sentinel)
             break
+    _write_dep_marker(target, version)
 
 
 def _download_moltenvk(deps_root: Path, *, dry_run: bool) -> None:
@@ -372,57 +516,103 @@ def _download_moltenvk(deps_root: Path, *, dry_run: bool) -> None:
             shutil.move(str(xc_src), str(sentinel))
 
 
-def _download_angle(deps_root: Path, *, dry_run: bool) -> None:
-    target = deps_root / "angle"
-    # ANGLE extracts to multiple per-arch dirs; pick one we always expect.
-    sentinel_files = (
-        target / "lib" / "libANGLE.windows.arm64.a",
-        target / "lib" / "libANGLE.windows.x86_64.a",
+def _download_angle(deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool) -> None:
+    # Version is the engine's single source of truth. The old chromium/6601.2
+    # arm64-llvm bundle embedded libc++ symbols that clashed with llvm-mingw at
+    # link time (the historical reason Windows arm64 was best-effort); reading
+    # the engine's pin keeps us on the rebuild it expects, so arm64 links.
+    version = _engine_install_version(
+        upstream_godot_dir, "install_angle.py", "angle_version"
     )
-    if any(p.exists() for p in sentinel_files):
-        logger.info("ANGLE already extracted under %s; skipping.", target)
+    # ``angle_version`` looks like ``chromium/7219``; the ``/`` is URL-encoded.
+    version_url = version.replace("/", "%2F")
+    base = (
+        "https://github.com/godotengine/godot-angle-static/releases/download/"
+        f"{version_url}/godot-angle-static"
+    )
+    archives = [
+        (fname, f"{base}-{variant}-release.zip")
+        for fname, variant in _ANGLE_ARCH_VARIANTS
+    ]
+    target = deps_root / "angle"
+    if _dep_marker_current(target, version):
+        logger.info("ANGLE %s already extracted under %s; skipping.", version, target)
         return
-    logger.info("Downloading ANGLE libraries...")
+    logger.info("Fetching ANGLE %s (engine-pinned) into %s", version, target)
     if dry_run:
         logger.info(
-            "[dry-run] Would download %d ANGLE archives into %s",
-            len(_ANGLE_ARCHIVES),
-            target,
+            "[dry-run] Would download %d ANGLE archives into %s", len(archives), target
         )
         return
+    if target.is_dir():
+        shutil.rmtree(target)  # stale version -> replace so libs cannot mix
     target.mkdir(parents=True, exist_ok=True)
-    for fname, url in _ANGLE_ARCHIVES:
+    for fname, url in archives:
         archive = target / fname
         _download_with_retry(url, archive)
         _extract(archive, target)
         archive.unlink(missing_ok=True)
+    _write_dep_marker(target, version)
 
 
-def _download_swappy(deps_root: Path, *, dry_run: bool) -> None:
+def _download_winrt(deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool) -> None:
+    """Fetch the WinRT (OneCore TTS) MinGW headers the Windows build needs.
+
+    Version is the engine's single source of truth (``install_winrt.py`` —
+    ``winrt_version``). The engine defaults ``winrt=yes`` and reads the headers
+    from ``winrt_path``; we mount this dir into the Windows container.
+    """
+    version = _engine_install_version(
+        upstream_godot_dir, "install_winrt.py", "winrt_version"
+    )
+    url = (
+        "https://github.com/godotengine/winrt-mingw/releases/download/"
+        f"{version}/winrt-headers.zip"
+    )
+    target = deps_root / "winrt"
+    if _dep_marker_current(target, version):
+        logger.info("WinRT %s already present at %s; skipping.", version, target)
+        return
+    logger.info("Fetching WinRT headers %s (engine-pinned) into %s", version, target)
+    if dry_run:
+        logger.info("[dry-run] Would download %s into %s", url, target)
+        return
+    if target.is_dir():
+        shutil.rmtree(target)
+    target.mkdir(parents=True, exist_ok=True)
+    archive = target / "winrt-headers.zip"
+    _download_with_retry(url, archive)
+    _extract(archive, target)
+    archive.unlink(missing_ok=True)
+    _write_dep_marker(target, version)
+
+
+def _download_swappy(deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool) -> None:
+    tag = _engine_install_version(
+        upstream_godot_dir, "install_swappy_android.py", "swappy_tag"
+    )
+    url = (
+        "https://github.com/godotengine/godot-swappy/releases/download/"
+        f"{tag}/godot-swappy.7z"
+    )
     target = deps_root / "swappy"
     # godot-swappy.7z extracts to a `godot-swappy/` subdir.
     sentinel = target / "godot-swappy"
-    if sentinel.is_dir() and any(sentinel.iterdir()):
-        logger.info("Swappy already extracted under %s; skipping.", target)
+    if sentinel.is_dir() and any(sentinel.iterdir()) and _dep_marker_current(target, tag):
+        logger.info("Swappy %s already extracted under %s; skipping.", tag, target)
         return
-    # Gap fix: detect partial state — 7z present but never extracted. Re-extract.
+    if target.is_dir():
+        shutil.rmtree(target)  # stale/partial -> replace
     target.mkdir(parents=True, exist_ok=True)
-    archive = target / "godot-swappy.7z"
-    if archive.is_file() and not sentinel.is_dir():
-        logger.warning(
-            "Swappy archive present at %s but no extracted dir; re-extracting.",
-            archive,
-        )
-        _extract(archive, target)
-        archive.unlink(missing_ok=True)
-        return
-    logger.info("Missing Swappy libraries, downloading them.")
+    logger.info("Fetching Swappy %s (engine-pinned) into %s", tag, target)
     if dry_run:
-        logger.info("[dry-run] Would download %s into %s", _SWAPPY_URL, target)
+        logger.info("[dry-run] Would download %s into %s", url, target)
         return
-    _download_with_retry(_SWAPPY_URL, archive)
+    archive = target / "godot-swappy.7z"
+    _download_with_retry(url, archive)
     _extract(archive, target)
     archive.unlink(missing_ok=True)
+    _write_dep_marker(target, tag)
 
 
 def _prepare_android_sign_keystore(deps_root: Path, *, dry_run: bool) -> None:
@@ -775,91 +965,24 @@ def _iter_platforms(
     """Yield ``(name, image, extra_mounts, extra_env)`` per platform in build order.
 
     Per-platform ``extra_mounts`` is a list of ``["-v", "host:container", ...]``
-    fragments appended after the common docker args.
+    fragments appended after the common docker args: the platform's ``out``
+    dir plus one ``/root/<dep>`` mount per dependency declared in the
+    :mod:`scripts.platforms` registry.
 
-    Always yields all six platforms (Linux, Android, Windows, macOS, iOS, Web).
+    Yields every platform in the registry's canonical order (Linux first).
     Apple targets are not gated — if the toolchain is missing, the
     in-container build emits an actionable error and the run fails.
+
+    Note: no ``/root/mesa`` mount for Windows — ``install_d3d12_sdk_windows.py``
+    installs Mesa NIR into ``bin/build_deps/mesa-*`` at SCons time inside the
+    container; a host-side mount would force a stale version.
     """
-    # Linux
-    yield (
-        "linux",
-        images["linux"],
-        [
-            "-v",
-            f"{basedir / 'out' / 'linux'}:/root/out",
-            "-v",
-            f"{basedir / 'deps' / 'accesskit'}:/root/accesskit",
-        ],
-        {},
-    )
-    # Android
-    yield (
-        "android",
-        images["android"],
-        [
-            "-v",
-            f"{basedir / 'out' / 'android'}:/root/out",
-            "-v",
-            f"{basedir / 'deps' / 'swappy'}:/root/swappy",
-            "-v",
-            f"{basedir / 'deps' / 'keystore'}:/root/keystore",
-        ],
-        {},
-    )
-    # Windows — STEAM env is intentionally left at 0.
-    # No /root/mesa mount: ``install_d3d12_sdk_windows.py --mingw_prefix``
-    # installs Mesa NIR into ``bin/build_deps/mesa-*`` at SCons time inside
-    # the container; a host-side mount would force a stale version.
-    yield (
-        "windows",
-        images["windows"],
-        [
-            "-v",
-            f"{basedir / 'out' / 'windows'}:/root/out",
-            "-v",
-            f"{basedir / 'deps' / 'angle'}:/root/angle",
-            "-v",
-            f"{basedir / 'deps' / 'accesskit'}:/root/accesskit",
-        ],
-        {"STEAM": "0"},
-    )
-    # Apple targets — always yielded. The in-container build raises a clear
-    # actionable error if the toolchain (Xcode SDK, Swift) is not set up.
-    yield (
-        "macos",
-        images["macos"],
-        [
-            "-v",
-            f"{basedir / 'out' / 'macos'}:/root/out",
-            "-v",
-            f"{basedir / 'deps' / 'moltenvk'}:/root/moltenvk",
-            "-v",
-            f"{basedir / 'deps' / 'angle'}:/root/angle",
-            "-v",
-            f"{basedir / 'deps' / 'accesskit'}:/root/accesskit",
-        ],
-        {},
-    )
-    yield (
-        "ios",
-        images["ios"],
-        [
-            "-v",
-            f"{basedir / 'out' / 'ios'}:/root/out",
-        ],
-        {},
-    )
-    # Web — listed last.
-    yield (
-        "web",
-        images["web"],
-        [
-            "-v",
-            f"{basedir / 'out' / 'web'}:/root/out",
-        ],
-        {},
-    )
+    for name in platforms.release_order():
+        plat = platforms.get(name)
+        mounts = ["-v", f"{basedir / 'out' / name}:/root/out"]
+        for dep in plat.deps:
+            mounts += ["-v", f"{basedir / 'deps' / dep}:/root/{dep}"]
+        yield (name, images[name], mounts, dict(plat.extra_env))
 
 
 def _run_build_platform(
@@ -971,15 +1094,17 @@ def _chown_outputs(basedir: Path, *, dry_run: bool) -> None:
     targets.extend(basedir.glob("godot*.tar.gz"))
 
     failures = 0
-    for target in targets:
-        if not target.exists():
-            continue
-        for path in _walk_tree(target):
-            try:
-                os.chown(path, uid_int, gid_int)
-            except OSError:
-                # One unchangeable path must never short-circuit the rest.
-                failures += 1
+    description = f"Restoring ownership of {basedir} outputs to {uid_int}:{gid_int}..."
+    with spinner(description):
+        for target in targets:
+            if not target.exists():
+                continue
+            for path in _walk_tree(target):
+                try:
+                    os.chown(path, uid_int, gid_int)
+                except OSError:
+                    # One unchangeable path must never short-circuit the rest.
+                    failures += 1
     if failures:
         logger.info(
             "chown: left %d path(s) unchanged (non-fatal — e.g. owned by a "

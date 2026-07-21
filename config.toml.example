@@ -35,11 +35,11 @@ username = "nongvantinh"
 # ---------------------------------------------------------------------------
 
 # Godot engine version string — used in SCons flags and image tags.
-godot_version = "4.7"
+godot_version = "4.8"
 
 # Branch / treeish of `godot_repo` to build. Authoritative engine source for
 # this Release.
-git_branch = "4.7.dev1"
+git_branch = "4.8.dev1"
 
 # Fork slug of the Godot source repository. The `--godot-repo` CLI flag
 # overrides this value.
@@ -116,7 +116,7 @@ redirect_build_objects = true
 
 [[platforms]]
 name = "linux"
-image = "ghcr.io/nongvantinh/godot-linux:4.7"
+image = "ghcr.io/nongvantinh/godot-linux:4.8"
 scons_flags = "platform=linuxbsd"
 archs = ["x86_64", "x86_32", "arm64", "arm32"]
 # Sets up the x86_64 buildroot cross-compiler before running SCons.
@@ -124,19 +124,19 @@ env_setup = "export PATH=$GODOT_SDK_LINUX_X86_64/bin:$BASE_PATH"
 
 [[platforms]]
 name = "windows"
-image = "ghcr.io/nongvantinh/godot-windows:4.7"
+image = "ghcr.io/nongvantinh/godot-windows:4.8"
 scons_flags = "platform=windows use_mingw=yes mingw_prefix=/root/llvm-mingw"
 archs = ["x86_64", "x86_32", "arm64"]
 
 [[platforms]]
 name = "android"
-image = "ghcr.io/nongvantinh/godot-android:4.7"
+image = "ghcr.io/nongvantinh/godot-android:4.8"
 scons_flags = "platform=android"
 archs = ["arm64", "arm32", "x86_64", "x86_32"]
 
 [[platforms]]
 name = "web"
-image = "ghcr.io/nongvantinh/godot-web:4.7"
+image = "ghcr.io/nongvantinh/godot-web:4.8"
 scons_flags = "platform=web"
 archs = ["wasm32"]
 # Activates the Emscripten SDK environment before running SCons.
@@ -144,13 +144,13 @@ env_setup = "source /root/emsdk/emsdk_env.sh"
 
 [[platforms]]
 name = "macos"
-image = "ghcr.io/nongvantinh/godot-osx:4.7"
+image = "ghcr.io/nongvantinh/godot-osx:4.8"
 scons_flags = "platform=macos"
 archs = ["universal"]
 
 [[platforms]]
 name = "ios"
-image = "ghcr.io/nongvantinh/godot-ios:4.7"
+image = "ghcr.io/nongvantinh/godot-ios:4.8"
 scons_flags = "platform=ios"
 archs = ["arm64"]
 
@@ -163,7 +163,7 @@ archs = ["arm64"]
 
 [release]
 # NOTE: no ``tag`` key here. The release tag is DERIVED from
-# ``upstream/godot/version.py`` (e.g. ``4.7.beta``) so it cannot drift from
+# ``upstream/godot/version.py`` (e.g. ``4.8.beta``) so it cannot drift from
 # what the engine binary reports at runtime. Adding ``tag = ...`` is rejected
 # with a clear error; for a one-off hotfix override, use the ``--tag`` CLI
 # flag on the ``release`` sub-command.

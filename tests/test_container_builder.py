@@ -21,7 +21,7 @@ from scripts.container_builder import (
 _CONTAINERS_DIR = Path("/fake/containers")
 _REGISTRY = "ghcr.io"
 _USERNAME = "testuser"
-_VERSION = "4.7"
+_VERSION = "4.8"
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +44,7 @@ class TestBuildImage:
             )
 
         assert any("dry-run" in record.message for record in caplog.records)
-        assert any("godot-linux:4.7" in record.message for record in caplog.records)
+        assert any("godot-linux:4.8" in record.message for record in caplog.records)
 
     def test_dry_run_does_not_call_subprocess(self):
         with patch("scripts.container_builder.subprocess.run") as mock_run:
@@ -87,7 +87,7 @@ class TestBuildImage:
         cmd = mock_run.call_args[0][0]
         cmd_str = " ".join(cmd)
         assert "Dockerfile.base" in cmd_str
-        assert "godot-fedora:4.7" in cmd_str
+        assert "godot-fedora:4.8" in cmd_str
         # base must NOT pass --build-arg IMAGE_VERSION
         assert "--build-arg" not in cmd_str
 
@@ -109,7 +109,7 @@ class TestBuildImage:
         cmd = mock_run.call_args[0][0]
         cmd_str = " ".join(cmd)
         assert "Dockerfile.linux" in cmd_str
-        assert "godot-linux:4.7" in cmd_str
+        assert "godot-linux:4.8" in cmd_str
         assert f"IMAGE_VERSION={_VERSION}" in cmd_str
 
     def test_failed_docker_build_raises_container_build_error(self):
@@ -238,7 +238,7 @@ class TestPushImage:
 
         messages = " ".join(r.message for r in caplog.records)
         assert "dry-run" in messages
-        assert "godot-linux:4.7" in messages
+        assert "godot-linux:4.8" in messages
 
     def test_dry_run_does_not_call_subprocess(self, monkeypatch):
         monkeypatch.setenv("GHCR_PAT", "fake_pat")
@@ -298,13 +298,13 @@ class TestPushImage:
         # docker tag command
         tag_cmd = next((c for c in all_cmds if "tag" in c), None)
         assert tag_cmd is not None
-        assert "godot-linux:4.7" in tag_cmd
-        assert f"{_REGISTRY}/{_USERNAME}/godot-linux:4.7" in tag_cmd
+        assert "godot-linux:4.8" in tag_cmd
+        assert f"{_REGISTRY}/{_USERNAME}/godot-linux:4.8" in tag_cmd
 
         # docker push command
         push_cmd = next((c for c in all_cmds if "push" in c), None)
         assert push_cmd is not None
-        assert f"{_REGISTRY}/{_USERNAME}/godot-linux:4.7" in push_cmd
+        assert f"{_REGISTRY}/{_USERNAME}/godot-linux:4.8" in push_cmd
 
     def test_unsupported_type_raises_unsupported_type_error(self, monkeypatch):
         monkeypatch.setenv("GHCR_PAT", "fake_pat")
@@ -338,8 +338,8 @@ class TestPushImage:
         all_cmds = [" ".join(c) for c in calls_made]
         tag_cmd = next((c for c in all_cmds if "tag" in c), None)
         assert tag_cmd is not None
-        assert "godot-fedora:4.7" in tag_cmd
-        assert f"{_REGISTRY}/{_USERNAME}/godot-fedora:4.7" in tag_cmd
+        assert "godot-fedora:4.8" in tag_cmd
+        assert f"{_REGISTRY}/{_USERNAME}/godot-fedora:4.8" in tag_cmd
 
 
 # ---------------------------------------------------------------------------

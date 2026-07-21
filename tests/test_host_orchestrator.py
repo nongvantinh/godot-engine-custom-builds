@@ -94,7 +94,7 @@ def _make_version_py(
     upstream: Path,
     *,
     major: int = 4,
-    minor: int = 7,
+    minor: int = 8,
     patch: int = 0,
     status: str = "dev1",
 ) -> None:
@@ -108,9 +108,22 @@ def _make_version_py(
         encoding="utf-8",
     )
     # Also stage misc/scripts/make_tarball.sh so the existence check passes.
-    (upstream / "misc" / "scripts").mkdir(parents=True, exist_ok=True)
-    (upstream / "misc" / "scripts" / "make_tarball.sh").write_text(
-        "#!/bin/sh\n", encoding="utf-8"
+    scripts = upstream / "misc" / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    (scripts / "make_tarball.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    # Stage the engine dependency-pin scripts the host orchestrator reads as the
+    # single source of truth for dep versions (see _engine_install_version).
+    (scripts / "install_accesskit.py").write_text(
+        'ac_version = "0.22.3"\n', encoding="utf-8"
+    )
+    (scripts / "install_angle.py").write_text(
+        'angle_version = "chromium/7219"\n', encoding="utf-8"
+    )
+    (scripts / "install_winrt.py").write_text(
+        'winrt_version = "72"\n', encoding="utf-8"
+    )
+    (scripts / "install_swappy_android.py").write_text(
+        'swappy_tag = "from-source-2025-01-31"\n', encoding="utf-8"
     )
 
 
@@ -127,14 +140,14 @@ def _populate_platform_output(out_plat: Path) -> None:
 
 class TestResolveImageNames:
     def test_resolves_six_platform_images_without_base_distro_suffix(self):
-        images = host_orchestrator._resolve_image_names("ghcr.io", "nongvantinh", "4.7")
+        images = host_orchestrator._resolve_image_names("ghcr.io", "nongvantinh", "4.8")
 
-        assert images["linux"] == "ghcr.io/nongvantinh/godot-linux:4.7"
-        assert images["windows"] == "ghcr.io/nongvantinh/godot-windows:4.7"
-        assert images["macos"] == "ghcr.io/nongvantinh/godot-osx:4.7"
-        assert images["android"] == "ghcr.io/nongvantinh/godot-android:4.7"
-        assert images["web"] == "ghcr.io/nongvantinh/godot-web:4.7"
-        assert images["ios"] == "ghcr.io/nongvantinh/godot-ios:4.7"
+        assert images["linux"] == "ghcr.io/nongvantinh/godot-linux:4.8"
+        assert images["windows"] == "ghcr.io/nongvantinh/godot-windows:4.8"
+        assert images["macos"] == "ghcr.io/nongvantinh/godot-osx:4.8"
+        assert images["android"] == "ghcr.io/nongvantinh/godot-android:4.8"
+        assert images["web"] == "ghcr.io/nongvantinh/godot-web:4.8"
+        assert images["ios"] == "ghcr.io/nongvantinh/godot-ios:4.8"
         # No legacy "-${BASE_DISTRO}" suffix.
         for ref in images.values():
             assert not ref.endswith("-")
@@ -146,20 +159,74 @@ class TestResolveImageNames:
 
 
 class TestPullImages:
-    def test_calls_docker_pull_for_every_image(self):
-        images = host_orchestrator._resolve_image_names("ghcr.io", "u", "4.7")
-        with mock.patch("scripts.host_orchestrator.subprocess.run") as run:
-            run.return_value = subprocess.CompletedProcess([], 0)
+    @staticmethod
+    def _fake_run(*, present: bool):
+        """subprocess.run stub: `docker image inspect` reports present/absent."""
+
+        def fake_run(cmd, *args, **kwargs):
+            if cmd[:3] == ["docker", "image", "inspect"]:
+                return subprocess.CompletedProcess(cmd, 0 if present else 1)
+            if cmd[:2] == ["docker", "pull"]:
+                return subprocess.CompletedProcess(cmd, 0)
+            raise AssertionError(f"Unexpected subprocess call: {cmd}")
+
+        return fake_run
+
+    def test_pulls_every_image_when_absent_locally(self):
+        images = host_orchestrator._resolve_image_names("ghcr.io", "u", "4.8")
+        with mock.patch(
+            "scripts.host_orchestrator.subprocess.run",
+            side_effect=self._fake_run(present=False),
+        ) as run:
             host_orchestrator._pull_images(images, dry_run=False)
 
-        # Six platforms -> six docker pull invocations.
-        assert run.call_count == len(images)
-        for call in run.call_args_list:
-            cmd = call.args[0]
-            assert cmd[0:2] == ["docker", "pull"]
+        pulls = [c for c in run.call_args_list if c.args[0][:2] == ["docker", "pull"]]
+        assert len(pulls) == len(images)
+
+    def test_skips_pull_when_image_present_locally(self):
+        """A locally present (e.g. retagged) image is used without pulling."""
+        images = host_orchestrator._resolve_image_names("ghcr.io", "u", "4.8")
+        with mock.patch(
+            "scripts.host_orchestrator.subprocess.run",
+            side_effect=self._fake_run(present=True),
+        ) as run:
+            host_orchestrator._pull_images(images, dry_run=False)
+
+        pulls = [c for c in run.call_args_list if c.args[0][:2] == ["docker", "pull"]]
+        assert pulls == []
+
+    def test_platform_scope_limits_images_touched(self):
+        images = host_orchestrator._resolve_image_names("ghcr.io", "u", "4.8")
+        with mock.patch(
+            "scripts.host_orchestrator.subprocess.run",
+            side_effect=self._fake_run(present=False),
+        ) as run:
+            host_orchestrator._pull_images(
+                images, platforms={"linux"}, dry_run=False
+            )
+
+        pulls = [c for c in run.call_args_list if c.args[0][:2] == ["docker", "pull"]]
+        assert len(pulls) == 1
+        assert pulls[0].args[0][2] == images["linux"]
+
+    def test_pull_failure_raises(self):
+        images = host_orchestrator._resolve_image_names("ghcr.io", "u", "4.8")
+
+        def fake_run(cmd, *args, **kwargs):
+            if cmd[:3] == ["docker", "image", "inspect"]:
+                return subprocess.CompletedProcess(cmd, 1)
+            return subprocess.CompletedProcess(cmd, 1)  # pull fails
+
+        with mock.patch(
+            "scripts.host_orchestrator.subprocess.run", side_effect=fake_run
+        ):
+            with pytest.raises(host_orchestrator._HostOrchestratorError):
+                host_orchestrator._pull_images(
+                    images, platforms={"linux"}, dry_run=False
+                )
 
     def test_dry_run_does_not_invoke_subprocess(self):
-        images = host_orchestrator._resolve_image_names("ghcr.io", "u", "4.7")
+        images = host_orchestrator._resolve_image_names("ghcr.io", "u", "4.8")
         with mock.patch("scripts.host_orchestrator.subprocess.run") as run:
             host_orchestrator._pull_images(images, dry_run=True)
 
@@ -229,14 +296,14 @@ class TestPrepareSource:
                 # The first git call is rev-parse --abbrev-ref HEAD.
                 if cmd[:2] == ["git", "-C"] and "rev-parse" in cmd:
                     return subprocess.CompletedProcess(
-                        cmd, 0, stdout="4.7.dev1\n", stderr=""
+                        cmd, 0, stdout="4.8.dev1\n", stderr=""
                     )
                 # version.py read runs in a python -c subprocess for isolation.
                 if _is_version_read_subprocess(cmd):
                     return _real_version_read(cmd)
                 # make_tarball.sh — fake it producing the tarball alongside.
                 if cmd[0] == "sh" and "make_tarball.sh" in cmd[1]:
-                    (upstream.parent / "godot-4.7.tar.gz").write_text("tarball")
+                    (upstream.parent / "godot-4.8.tar.gz").write_text("tarball")
                     return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
                 # Any other subprocess call would mean we clone/reset — fail loudly.
                 raise AssertionError(f"Unexpected subprocess call: {cmd}")
@@ -246,14 +313,14 @@ class TestPrepareSource:
             version, status = host_orchestrator._prepare_source(
                 basedir=basedir,
                 upstream_godot_dir=upstream,
-                git_branch="4.7.dev1",
+                git_branch="4.8.dev1",
                 version_status_patch="",
                 dry_run=False,
             )
 
         # Tarball is moved next to *basedir*.
-        assert (basedir / "godot-4.7.tar.gz").is_file()
-        assert version == "4.7"
+        assert (basedir / "godot-4.8.tar.gz").is_file()
+        assert version == "4.8"
         assert status == "dev1"
         # No `git reset --hard` / `git clean -fdx` / `git clone` ever called.
         for call in run.call_args_list:
@@ -279,7 +346,7 @@ class TestPrepareSource:
             if _is_version_read_subprocess(cmd):
                 return _real_version_read(cmd)
             if cmd[0] == "sh":
-                (upstream.parent / "godot-4.7.tar.gz").write_text("tarball")
+                (upstream.parent / "godot-4.8.tar.gz").write_text("tarball")
                 return subprocess.CompletedProcess(cmd, 0)
             raise AssertionError(f"Unexpected subprocess call: {cmd}")
 
@@ -290,14 +357,14 @@ class TestPrepareSource:
             host_orchestrator._prepare_source(
                 basedir=basedir,
                 upstream_godot_dir=upstream,
-                git_branch="4.7.dev1",
+                git_branch="4.8.dev1",
                 version_status_patch="",
                 dry_run=False,
             )
 
         text = caplog.text
         assert "feature/my-fix" in text
-        assert "4.7.dev1" in text
+        assert "4.8.dev1" in text
 
     def test_computes_tarball_path_with_godot_version(self, tmp_path):
         basedir = tmp_path / "build-godot-and-templates"
@@ -307,12 +374,12 @@ class TestPrepareSource:
 
         def fake_run(cmd, *args, **kwargs):
             if "rev-parse" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, stdout="4.7\n", stderr="")
+                return subprocess.CompletedProcess(cmd, 0, stdout="4.8\n", stderr="")
             if _is_version_read_subprocess(cmd):
                 return _real_version_read(cmd)
             if cmd[0] == "sh":
-                # patch != 0 -> version becomes "4.7.2".
-                (upstream.parent / "godot-4.7.2.tar.gz").write_text("tarball")
+                # patch != 0 -> version becomes "4.8.2".
+                (upstream.parent / "godot-4.8.2.tar.gz").write_text("tarball")
                 return subprocess.CompletedProcess(cmd, 0)
             raise AssertionError(f"Unexpected: {cmd}")
 
@@ -322,13 +389,13 @@ class TestPrepareSource:
             version, _ = host_orchestrator._prepare_source(
                 basedir=basedir,
                 upstream_godot_dir=upstream,
-                git_branch="4.7",
+                git_branch="4.8",
                 version_status_patch="",
                 dry_run=False,
             )
 
-        assert version == "4.7.2"
-        assert (basedir / "godot-4.7.2.tar.gz").is_file()
+        assert version == "4.8.2"
+        assert (basedir / "godot-4.8.2.tar.gz").is_file()
 
     def test_dry_run_does_not_invoke_make_tarball(self, tmp_path):
         basedir = tmp_path / "build-godot-and-templates"
@@ -339,7 +406,7 @@ class TestPrepareSource:
         def fake_run(cmd, *args, **kwargs):
             if "rev-parse" in cmd:
                 return subprocess.CompletedProcess(
-                    cmd, 0, stdout="4.7.dev1\n", stderr=""
+                    cmd, 0, stdout="4.8.dev1\n", stderr=""
                 )
             if _is_version_read_subprocess(cmd):
                 return _real_version_read(cmd)
@@ -351,14 +418,14 @@ class TestPrepareSource:
             version, status = host_orchestrator._prepare_source(
                 basedir=basedir,
                 upstream_godot_dir=upstream,
-                git_branch="4.7.dev1",
+                git_branch="4.8.dev1",
                 version_status_patch="",
                 dry_run=True,
             )
 
-        assert version == "4.7"
+        assert version == "4.8"
         assert status == "dev1"
-        assert not (basedir / "godot-4.7.tar.gz").exists()
+        assert not (basedir / "godot-4.8.tar.gz").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +447,7 @@ class TestReadVersionSubprocess:
         ) as run_spy:
             version, status = host_orchestrator._read_version(upstream)
 
-        assert version == "4.7"
+        assert version == "4.8"
         assert status == "dev1"
         # At least one subprocess call, and it must invoke the python
         # interpreter with ``-c`` (i.e. the isolated read path, not the old
@@ -451,49 +518,161 @@ class TestDownloadWithRetry:
                 )
 
 
-class TestDownloadSwappyPartialState:
-    def test_archive_present_but_unextracted_triggers_reextract(self, tmp_path):
-        # The dir-marker deps/swappy/ is NOT proof-of-success — we check for
-        # the extracted godot-swappy/ subdir and re-extract from the .7z when
-        # it's missing.
-        deps = tmp_path / "deps"
-        target = deps / "swappy"
-        target.mkdir(parents=True)
-        archive = target / "godot-swappy.7z"
-        archive.write_bytes(b"7z archive contents")
+class TestDownloadSwappy:
+    @staticmethod
+    def _upstream_with_swappy(tmp_path, tag="from-source-2025-01-31"):
+        up = tmp_path / "upstream" / "godot"
+        scripts = up / "misc" / "scripts"
+        scripts.mkdir(parents=True, exist_ok=True)
+        (scripts / "install_swappy_android.py").write_text(
+            f'swappy_tag = "{tag}"\n', encoding="utf-8"
+        )
+        return up
 
-        def fake_extract(arch, dest):
-            # Simulate 7z extracting into a godot-swappy/ subdir.
-            (dest / "godot-swappy").mkdir(parents=True, exist_ok=True)
-            (dest / "godot-swappy" / "libswappy.a").write_text("lib")
-
-        with mock.patch(
-            "scripts.host_orchestrator._extract", side_effect=fake_extract
-        ) as extract:
-            host_orchestrator._download_swappy(deps, dry_run=False)
-
-        # Extracted dir now exists, .7z was deleted, urlretrieve was NOT called.
-        assert (target / "godot-swappy").is_dir()
-        assert not archive.exists()
-        extract.assert_called_once()
-
-    def test_skips_when_extracted_dir_already_present(self, tmp_path):
+    def test_skips_when_extracted_and_marker_current(self, tmp_path):
+        # Skip only when the extracted dir exists AND the version marker matches
+        # the engine-pinned tag — a pure skip (no download, no extract).
         deps = tmp_path / "deps"
         target = deps / "swappy"
         (target / "godot-swappy").mkdir(parents=True)
         (target / "godot-swappy" / "libswappy.a").write_text("lib")
+        (target / ".dep-version").write_text("from-source-2025-01-31")
+        up = self._upstream_with_swappy(tmp_path)
 
-        # No subprocess, no urlretrieve, no extract — pure skip.
         with (
-            mock.patch(
-                "scripts.host_orchestrator.urllib.request.urlretrieve"
-            ) as urlretrieve,
+            mock.patch("scripts.host_orchestrator._download_with_retry") as dl,
             mock.patch("scripts.host_orchestrator._extract") as extract,
         ):
-            host_orchestrator._download_swappy(deps, dry_run=False)
+            host_orchestrator._download_swappy(deps, up, dry_run=False)
 
-        urlretrieve.assert_not_called()
+        dl.assert_not_called()
         extract.assert_not_called()
+
+    def test_redownloads_when_marker_missing_or_stale(self, tmp_path):
+        # A present-but-unmarked (or stale) dir is replaced and re-fetched at
+        # the engine-pinned tag, then re-marked.
+        deps = tmp_path / "deps"
+        target = deps / "swappy"
+        (target / "godot-swappy").mkdir(parents=True)  # present, but no marker
+        up = self._upstream_with_swappy(tmp_path)
+
+        def fake_extract(archive, dest):
+            (dest / "godot-swappy").mkdir(parents=True, exist_ok=True)
+
+        with (
+            mock.patch("scripts.host_orchestrator._download_with_retry") as dl,
+            mock.patch(
+                "scripts.host_orchestrator._extract", side_effect=fake_extract
+            ) as extract,
+        ):
+            host_orchestrator._download_swappy(deps, up, dry_run=False)
+
+        dl.assert_called_once()
+        extract.assert_called_once()
+        assert (
+            (target / ".dep-version").read_text().strip() == "from-source-2025-01-31"
+        )
+        # The pinned tag must appear in the download URL.
+        assert "from-source-2025-01-31" in dl.call_args.args[0]
+
+
+class TestEngineInstallVersion:
+    """The engine's install_*.py scripts are the single source of truth for
+    dependency versions; we parse them rather than maintain a drifting copy."""
+
+    def _script(self, tmp_path, name, body):
+        up = tmp_path / "upstream" / "godot"
+        scripts = up / "misc" / "scripts"
+        scripts.mkdir(parents=True, exist_ok=True)
+        (scripts / name).write_text(body, encoding="utf-8")
+        return up
+
+    def test_parses_version_constant(self, tmp_path):
+        up = self._script(
+            tmp_path, "install_angle.py", '# c\nangle_version = "chromium/7219"\n'
+        )
+        assert (
+            host_orchestrator._engine_install_version(
+                up, "install_angle.py", "angle_version"
+            )
+            == "chromium/7219"
+        )
+
+    def test_raises_when_script_missing(self, tmp_path):
+        up = tmp_path / "upstream" / "godot"
+        up.mkdir(parents=True)
+        with pytest.raises(host_orchestrator._HostOrchestratorError):
+            host_orchestrator._engine_install_version(
+                up, "install_angle.py", "angle_version"
+            )
+
+    def test_raises_when_var_missing(self, tmp_path):
+        up = self._script(tmp_path, "install_angle.py", 'other = "x"\n')
+        with pytest.raises(host_orchestrator._HostOrchestratorError):
+            host_orchestrator._engine_install_version(
+                up, "install_angle.py", "angle_version"
+            )
+
+
+class TestDownloadWinrt:
+    def test_fetches_engine_pinned_version(self, tmp_path):
+        deps = tmp_path / "deps"
+        up = tmp_path / "upstream" / "godot"
+        scripts = up / "misc" / "scripts"
+        scripts.mkdir(parents=True, exist_ok=True)
+        (scripts / "install_winrt.py").write_text(
+            'winrt_version = "72"\n', encoding="utf-8"
+        )
+        with (
+            mock.patch("scripts.host_orchestrator._download_with_retry") as dl,
+            mock.patch("scripts.host_orchestrator._extract"),
+        ):
+            host_orchestrator._download_winrt(deps, up, dry_run=False)
+        dl.assert_called_once()
+        assert "/72/winrt-headers.zip" in dl.call_args.args[0]
+        assert (deps / "winrt" / ".dep-version").read_text().strip() == "72"
+
+
+class TestVersionAwareDeps:
+    """A version bump in the engine's pin must invalidate a stale local copy."""
+
+    def _upstream(self, tmp_path, ac):
+        up = tmp_path / "upstream" / "godot"
+        scripts = up / "misc" / "scripts"
+        scripts.mkdir(parents=True, exist_ok=True)
+        (scripts / "install_accesskit.py").write_text(
+            f'ac_version = "{ac}"\n', encoding="utf-8"
+        )
+        return up
+
+    def test_stale_version_triggers_refetch(self, tmp_path):
+        deps = tmp_path / "deps"
+        target = deps / "accesskit"
+        (target / "accesskit-c").mkdir(parents=True)  # old copy present
+        (target / ".dep-version").write_text("0.21.2")  # but stale marker
+        up = self._upstream(tmp_path, ac="0.22.3")
+
+        def fake_extract(archive, dest):
+            (dest / "accesskit-c-0.22.3").mkdir(parents=True, exist_ok=True)
+
+        with (
+            mock.patch("scripts.host_orchestrator._download_with_retry") as dl,
+            mock.patch("scripts.host_orchestrator._extract", side_effect=fake_extract),
+        ):
+            host_orchestrator._download_accesskit(deps, up, dry_run=False)
+        dl.assert_called_once()
+        assert "0.22.3/accesskit-c-0.22.3.zip" in dl.call_args.args[0]
+        assert (target / ".dep-version").read_text().strip() == "0.22.3"
+
+    def test_current_marker_skips_download(self, tmp_path):
+        deps = tmp_path / "deps"
+        target = deps / "accesskit"
+        (target / "accesskit-c").mkdir(parents=True)
+        (target / ".dep-version").write_text("0.22.3")
+        up = self._upstream(tmp_path, ac="0.22.3")
+        with mock.patch("scripts.host_orchestrator._download_with_retry") as dl:
+            host_orchestrator._download_accesskit(deps, up, dry_run=False)
+        dl.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -621,7 +800,7 @@ class TestChown:
         # Stage real targets so the chown loop tries them.
         (tmp_path / "out").mkdir()
         (tmp_path / "mono-glue").mkdir()
-        (tmp_path / "godot-4.7.tar.gz").write_text("tarball")
+        (tmp_path / "godot-4.8.tar.gz").write_text("tarball")
 
         caplog.set_level(logging.INFO, logger="scripts.host_orchestrator")
         with mock.patch(
@@ -644,7 +823,7 @@ class TestChown:
         # leave most outputs unchanged.
         (tmp_path / "out").mkdir()
         (tmp_path / "mono-glue").mkdir()
-        (tmp_path / "godot-4.7.tar.gz").write_text("tarball")
+        (tmp_path / "godot-4.8.tar.gz").write_text("tarball")
 
         # First chown call raises; subsequent ones succeed. We assert the
         # loop reaches all three top-level targets even after the first
@@ -665,7 +844,7 @@ class TestChown:
         # All three top-level targets must have been attempted.
         assert tmp_path / "out" in attempted_targets
         assert tmp_path / "mono-glue" in attempted_targets
-        assert tmp_path / "godot-4.7.tar.gz" in attempted_targets
+        assert tmp_path / "godot-4.8.tar.gz" in attempted_targets
 
 
 # ---------------------------------------------------------------------------
@@ -700,7 +879,7 @@ class TestRunBuildEndToEnd:
         def fake_run(cmd, *args, **kwargs):
             if "rev-parse" in cmd:
                 return subprocess.CompletedProcess(
-                    cmd, 0, stdout="4.7.dev1\n", stderr=""
+                    cmd, 0, stdout="4.8.dev1\n", stderr=""
                 )
             if _is_version_read_subprocess(cmd):
                 return _real_version_read(cmd)
@@ -719,8 +898,8 @@ class TestRunBuildEndToEnd:
                 basedir=basedir,
                 registry="ghcr.io",
                 username="u",
-                container_version="4.7",
-                git_branch="4.7.dev1",
+                container_version="4.8",
+                git_branch="4.8.dev1",
                 godot_repo="u/godot",
                 upstream_godot_dir=upstream,
                 build_type="all",
@@ -737,7 +916,7 @@ class TestRunBuildEndToEnd:
         # Apple targets always attempt to build — _iter_platforms must yield
         # macOS and iOS unconditionally; failures surface inside the container.
         images = {
-            plat: f"ghcr.io/u/godot-{plat}:4.7"
+            plat: f"ghcr.io/u/godot-{plat}:4.8"
             for plat in ("linux", "android", "windows", "macos", "ios", "web")
         }
         yielded = [
@@ -762,14 +941,16 @@ class TestRunBuildEndToEnd:
         def fake_run(cmd, *args, **kwargs):
             if "rev-parse" in cmd:
                 return subprocess.CompletedProcess(
-                    cmd, 0, stdout="4.7.dev1\n", stderr=""
+                    cmd, 0, stdout="4.8.dev1\n", stderr=""
                 )
             if _is_version_read_subprocess(cmd):
                 return _real_version_read(cmd)
+            if cmd[:3] == ["docker", "image", "inspect"]:
+                return subprocess.CompletedProcess(cmd, 1)
             if cmd[:2] == ["docker", "pull"]:
                 return subprocess.CompletedProcess(cmd, 0)
             if cmd[0] == "sh":
-                (upstream.parent / "godot-4.7.tar.gz").write_text("tarball")
+                (upstream.parent / "godot-4.8.tar.gz").write_text("tarball")
                 return subprocess.CompletedProcess(cmd, 0)
             raise AssertionError(f"Unexpected subprocess call: {cmd}")
 
@@ -784,8 +965,8 @@ class TestRunBuildEndToEnd:
                 basedir=basedir,
                 registry="ghcr.io",
                 username="u",
-                container_version="4.7",
-                git_branch="4.7.dev1",
+                container_version="4.8",
+                git_branch="4.8.dev1",
                 godot_repo="u/godot",
                 upstream_godot_dir=upstream,
                 build_type="all",
@@ -810,14 +991,16 @@ class TestRunBuildEndToEnd:
         def fake_run(cmd, *args, **kwargs):
             if "rev-parse" in cmd:
                 return subprocess.CompletedProcess(
-                    cmd, 0, stdout="4.7.dev1\n", stderr=""
+                    cmd, 0, stdout="4.8.dev1\n", stderr=""
                 )
             if _is_version_read_subprocess(cmd):
                 return _real_version_read(cmd)
+            if cmd[:3] == ["docker", "image", "inspect"]:
+                return subprocess.CompletedProcess(cmd, 1)
             if cmd[:2] == ["docker", "pull"]:
                 return subprocess.CompletedProcess(cmd, 0)
             if cmd[0] == "sh":
-                (upstream.parent / "godot-4.7.tar.gz").write_text("tarball")
+                (upstream.parent / "godot-4.8.tar.gz").write_text("tarball")
                 return subprocess.CompletedProcess(cmd, 0)
             raise AssertionError(f"Unexpected: {cmd}")
 
@@ -832,8 +1015,8 @@ class TestRunBuildEndToEnd:
                 basedir=basedir,
                 registry="ghcr.io",
                 username="u",
-                container_version="4.7",
-                git_branch="4.7.dev1",
+                container_version="4.8",
+                git_branch="4.8.dev1",
                 godot_repo="u/godot",
                 upstream_godot_dir=upstream,
                 build_type="all",
@@ -855,14 +1038,14 @@ class TestCleanModes:
         for name in ("mono-glue", "out", "releases", "deps"):
             (tmp_path / name).mkdir()
             (tmp_path / name / "marker").write_text("x")
-        (tmp_path / "godot-4.7.tar.gz").write_text("tarball")
+        (tmp_path / "godot-4.8.tar.gz").write_text("tarball")
 
         rc = host_orchestrator.run_build(
             basedir=tmp_path,
             registry="ghcr.io",
             username="u",
-            container_version="4.7",
-            git_branch="4.7.dev1",
+            container_version="4.8",
+            git_branch="4.8.dev1",
             godot_repo="u/godot",
             upstream_godot_dir=tmp_path / "irrelevant",
             build_type="all",
@@ -874,7 +1057,7 @@ class TestCleanModes:
         assert not (tmp_path / "mono-glue").exists()
         assert not (tmp_path / "out").exists()
         assert not (tmp_path / "releases").exists()
-        assert not (tmp_path / "godot-4.7.tar.gz").exists()
+        assert not (tmp_path / "godot-4.8.tar.gz").exists()
         # deps/ is preserved.
         assert (tmp_path / "deps").is_dir()
 
@@ -887,8 +1070,8 @@ class TestCleanModes:
             basedir=tmp_path,
             registry="ghcr.io",
             username="u",
-            container_version="4.7",
-            git_branch="4.7.dev1",
+            container_version="4.8",
+            git_branch="4.8.dev1",
             godot_repo="u/godot",
             upstream_godot_dir=tmp_path / "irrelevant",
             build_type="all",
@@ -910,7 +1093,7 @@ class TestCleanModes:
 
 class TestPhase3DockerInvocation:
     def test_common_docker_args_mount_scripts_and_set_pythonpath(self, tmp_path):
-        tarball = tmp_path / "godot-4.7.tar.gz"
+        tarball = tmp_path / "godot-4.8.tar.gz"
         tarball.write_text("t")
         mono_glue = tmp_path / "mono-glue"
         mono_glue.mkdir()
@@ -943,7 +1126,7 @@ class TestPhase3DockerInvocation:
         basedir.mkdir()
         (basedir / "build-mono-glue").mkdir()
         (basedir / "out" / "logs").mkdir(parents=True)
-        tarball = basedir / "godot-4.7.tar.gz"
+        tarball = basedir / "godot-4.8.tar.gz"
         tarball.write_text("t")
         mono_glue = basedir / "mono-glue"
         mono_glue.mkdir()
@@ -956,7 +1139,7 @@ class TestPhase3DockerInvocation:
         with mock.patch("scripts.host_orchestrator._run_and_tee", side_effect=fake_tee):
             host_orchestrator._run_build_mono_glue(
                 basedir=basedir,
-                linux_image="ghcr.io/u/godot-linux:4.7",
+                linux_image="ghcr.io/u/godot-linux:4.8",
                 tarball=tarball,
                 mono_glue_dir=mono_glue,
                 logs_dir=basedir / "out" / "logs",
@@ -974,7 +1157,7 @@ class TestPhase3DockerInvocation:
     def test_run_build_platform_invokes_python3_per_platform_module(self, tmp_path):
         basedir = tmp_path / "build-godot-and-templates"
         basedir.mkdir()
-        tarball = basedir / "godot-4.7.tar.gz"
+        tarball = basedir / "godot-4.8.tar.gz"
         tarball.write_text("t")
         mono_glue = basedir / "mono-glue"
         mono_glue.mkdir()
@@ -989,7 +1172,7 @@ class TestPhase3DockerInvocation:
         with mock.patch("scripts.host_orchestrator._run_and_tee", side_effect=fake_tee):
             host_orchestrator._run_build_platform(
                 name="linux",
-                image="ghcr.io/u/godot-linux:4.7",
+                image="ghcr.io/u/godot-linux:4.8",
                 basedir=basedir,
                 tarball=tarball,
                 mono_glue_dir=mono_glue,
@@ -1006,7 +1189,7 @@ class TestPhase3DockerInvocation:
     def test_run_build_platform_dispatches_per_platform_module_name(self, tmp_path):
         basedir = tmp_path / "b"
         basedir.mkdir()
-        tarball = basedir / "godot-4.7.tar.gz"
+        tarball = basedir / "godot-4.8.tar.gz"
         tarball.write_text("t")
         mono_glue = basedir / "mg"
         mono_glue.mkdir()

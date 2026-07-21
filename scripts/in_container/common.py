@@ -598,6 +598,23 @@ def env_num_cores(default: int = 1) -> int:
     return max(1, value)
 
 
+def env_build_archs() -> set[str] | None:
+    """Return the arch scope from ``GODOT_BUILD_ARCHS``, or ``None`` for all.
+
+    The host orchestrator sets ``GODOT_BUILD_ARCHS`` to a comma-separated arch
+    list when a Release run is scoped to a subset of arches (e.g. ``x86_64``
+    for a fast first build); unset or empty means "build every arch this
+    container supports" — the historical default. Per-platform build scripts
+    intersect their arch matrix with this set, so an arch that is not in the
+    set is skipped.
+    """
+    raw = os.environ.get("GODOT_BUILD_ARCHS")
+    if not raw or not raw.strip():
+        return None
+    archs = {a.strip() for a in raw.split(",") if a.strip()}
+    return archs or None
+
+
 def parse_argv(argv: Sequence[str] | None) -> list[str]:
     """Normalise *argv* the same way every ``main(argv=None)`` does.
 

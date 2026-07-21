@@ -12,6 +12,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from scripts.console import ResultTable, section
+from scripts.proc import run_or_raise
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -130,7 +133,7 @@ def build_image(
     container_type:
         One of :data:`SUPPORTED_TYPES`.
     version:
-        Image version tag, e.g. ``"4.7"``.
+        Image version tag, e.g. ``"4.8"``.
     containers_dir:
         Path to the directory that contains the Dockerfiles.
     registry:
@@ -205,12 +208,13 @@ def build_image(
 
     logger.info("Building container image: %s", full_tag)
     logger.debug("Full command: %s", " ".join(cmd))
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise ContainerBuildError(
-            f"docker build for '{container_type}' failed with exit code {exc.returncode}."
-        ) from exc
+    run_or_raise(
+        cmd,
+        error_cls=ContainerBuildError,
+        error_message=(
+            f"docker build for '{container_type}' failed with exit code {{returncode}}."
+        ),
+    )
 
 
 def push_image(
@@ -230,7 +234,7 @@ def push_image(
     container_type:
         One of :data:`SUPPORTED_TYPES`.
     version:
-        Image version tag, e.g. ``"4.7"``.
+        Image version tag, e.g. ``"4.8"``.
     registry:
         Registry hostname, e.g. ``"ghcr.io"``.
     username:
@@ -278,12 +282,12 @@ def push_image(
         logger.info("[dry-run] Would run: echo $GHCR_PAT | %s", " ".join(login_cmd))
     else:
         logger.info("Logging in to %s as %s", registry, username)
-        try:
-            subprocess.run(login_cmd, input=pat.encode(), check=True)
-        except subprocess.CalledProcessError as exc:
-            raise ContainerBuildError(
-                f"docker login to '{registry}' failed with exit code {exc.returncode}."
-            ) from exc
+        run_or_raise(
+            login_cmd,
+            error_cls=ContainerBuildError,
+            error_message=f"docker login to '{registry}' failed with exit code {{returncode}}.",
+            input=pat.encode(),
+        )
 
     # --- docker tag ---
     tag_cmd = ["docker", "tag", local_tag, remote_tag]
@@ -291,12 +295,11 @@ def push_image(
         logger.info("[dry-run] Would run: %s", " ".join(tag_cmd))
     else:
         logger.info("Tagging %s → %s", local_tag, remote_tag)
-        try:
-            subprocess.run(tag_cmd, check=True)
-        except subprocess.CalledProcessError as exc:
-            raise ContainerBuildError(
-                f"docker tag failed with exit code {exc.returncode}."
-            ) from exc
+        run_or_raise(
+            tag_cmd,
+            error_cls=ContainerBuildError,
+            error_message="docker tag failed with exit code {returncode}.",
+        )
 
     # --- docker push ---
     push_cmd = ["docker", "push", remote_tag]
@@ -305,12 +308,11 @@ def push_image(
         return
 
     logger.info("Pushing %s", remote_tag)
-    try:
-        subprocess.run(push_cmd, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise ContainerBuildError(
-            f"docker push for '{remote_tag}' failed with exit code {exc.returncode}."
-        ) from exc
+    run_or_raise(
+        push_cmd,
+        error_cls=ContainerBuildError,
+        error_message=f"docker push for '{remote_tag}' failed with exit code {{returncode}}.",
+    )
 
 
 def is_image_built(container_type: str, version: str) -> bool:
@@ -321,7 +323,7 @@ def is_image_built(container_type: str, version: str) -> bool:
     container_type:
         One of :data:`SUPPORTED_TYPES`.
     version:
-        Image version tag, e.g. ``"4.7"``.
+        Image version tag, e.g. ``"4.8"``.
     """
     if container_type not in SUPPORTED_TYPES:
         return False
@@ -442,13 +444,13 @@ def extract_apple_sdks(
     )
     logger.debug("Full command: %s", " ".join(cmd))
     try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as exc:
-        logger.error(
-            "docker run for '%s' failed with exit code %d.",
-            image_tag,
-            exc.returncode,
+        run_or_raise(
+            cmd,
+            error_cls=ContainerBuildError,
+            error_message=f"docker run for '{image_tag}' failed with exit code {{returncode}}.",
         )
+    except ContainerBuildError as exc:
+        logger.error("%s", exc)
         return 4
 
     return 0
@@ -478,7 +480,7 @@ def build_and_push(
     types:
         List of container type strings (may include ``"all"``).
     version:
-        Image version tag, e.g. ``"4.7"``.
+        Image version tag, e.g. ``"4.8"``.
     containers_dir:
         Path to the directory containing the Dockerfiles.
     registry:
@@ -541,6 +543,10 @@ def build_and_push(
     needs_apple_extraction: bool = bool(resolved & _APPLE_SDK_CONSUMER_TYPES)
     apple_extraction_done: bool = False
 
+    results = ResultTable(
+        "Container build summary", ["Image", "Build", "Push"], status_column=(1, 2)
+    )
+
     for container_type in ordered:
         # Just-in-time SDK extraction (Apple chain orchestration gap):
         # before the first osx/ios build, run godot-xcode to write the SDK
@@ -560,14 +566,17 @@ def build_and_push(
                 return rc
             apple_extraction_done = True
 
+        image_ref = f"{_IMAGE_NAME[container_type]}:{version}"
+        push_status = "-"
+
         if not dry_run and is_image_built(container_type, version):
             logger.info(
-                "Image %s:%s already exists locally — skipping build.",
-                _IMAGE_NAME[container_type],
-                version,
+                "Image %s already exists locally — skipping build.",
+                image_ref,
             )
+            build_status = "skipped"
         else:
-            logger.info("--- Building container: %s ---", container_type)
+            section(f"Building container: {container_type}", image_ref)
             try:
                 build_image(
                     container_type=container_type,
@@ -581,13 +590,18 @@ def build_and_push(
                 )
             except UnsupportedTypeError as exc:
                 logger.error("%s", exc)
+                results.add(image_ref, "error", push_status)
+                results.print()
                 return 2
             except ContainerBuildError as exc:
                 logger.error("%s", exc)
+                results.add(image_ref, "failed", push_status)
+                results.print()
                 return 4
+            build_status = "dry-run" if dry_run else "ok"
 
         if push:
-            logger.info("--- Pushing container: %s ---", container_type)
+            section(f"Pushing container: {container_type}", image_ref)
             try:
                 push_image(
                     container_type=container_type,
@@ -598,9 +612,17 @@ def build_and_push(
                 )
             except UnsupportedTypeError as exc:
                 logger.error("%s", exc)
+                results.add(image_ref, build_status, "error")
+                results.print()
                 return 2
             except ContainerBuildError as exc:
                 logger.error("%s", exc)
+                results.add(image_ref, build_status, "failed")
+                results.print()
                 return 4
+            push_status = "dry-run" if dry_run else "ok"
 
+        results.add(image_ref, build_status, push_status)
+
+    results.print()
     return 0

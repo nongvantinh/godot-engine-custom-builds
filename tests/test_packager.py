@@ -25,12 +25,12 @@ from scripts import packager
 # ---------------------------------------------------------------------------
 
 
-_GODOT_VERSION = "4.7"
+_GODOT_VERSION = "4.8"
 _STATUS = "dev1"
 # Single source of truth — filenames and templates_version both use the
-# dot-joined `<version>.<status>` form (e.g. "4.7.dev1") so the install path
+# dot-joined `<version>.<status>` form (e.g. "4.8.dev1") so the install path
 # Godot derives from `version.txt` matches the engine binary's reported
-# version exactly. The hyphen-joined `4.7-dev1` form is no longer produced.
+# version exactly. The hyphen-joined `4.8-dev1` form is no longer produced.
 _BINARIES_VERSION = f"{_GODOT_VERSION}.{_STATUS}"
 _TEMPLATES_VERSION = _BINARIES_VERSION
 _GODOT_BASENAME = f"Godot_v{_BINARIES_VERSION}"
@@ -67,26 +67,34 @@ def _stage_windows(
     out_dir: Path, *, archs=("x86_64", "x86_32", "arm64"), mono: bool = False
 ) -> None:
     for arch in archs:
+        # arm64 is built with llvm-mingw (use_llvm=yes), so Godot names the
+        # binary godot.windows.editor.arm64.llvm.exe — the ".llvm" infix real
+        # builds carry. Staging it faithfully is what makes the winarm64
+        # assertions a genuine regression net for the packager's infix handling.
+        infix = ".llvm" if arch == "arm64" else ""
         tools = out_dir / "windows" / arch / ("tools-mono" if mono else "tools")
         templates = (
             out_dir / "windows" / arch / ("templates-mono" if mono else "templates")
         )
         if mono:
-            _write(tools / f"godot.windows.editor.{arch}.mono.exe")
-            _write(tools / f"godot.windows.editor.{arch}.mono.console.exe")
+            _write(tools / f"godot.windows.editor.{arch}{infix}.mono.exe")
+            _write(tools / f"godot.windows.editor.{arch}{infix}.mono.console.exe")
             (tools / "GodotSharp").mkdir(parents=True, exist_ok=True)
             _write(tools / "GodotSharp" / "GodotSharp.dll", "sharp")
             for v in ("release", "debug"):
-                _write(templates / f"godot.windows.template_{v}.{arch}.mono.exe")
+                _write(templates / f"godot.windows.template_{v}.{arch}{infix}.mono.exe")
                 _write(
-                    templates / f"godot.windows.template_{v}.{arch}.mono.console.exe"
+                    templates
+                    / f"godot.windows.template_{v}.{arch}{infix}.mono.console.exe"
                 )
         else:
-            _write(tools / f"godot.windows.editor.{arch}.exe")
-            _write(tools / f"godot.windows.editor.{arch}.console.exe")
+            _write(tools / f"godot.windows.editor.{arch}{infix}.exe")
+            _write(tools / f"godot.windows.editor.{arch}{infix}.console.exe")
             for v in ("release", "debug"):
-                _write(templates / f"godot.windows.template_{v}.{arch}.exe")
-                _write(templates / f"godot.windows.template_{v}.{arch}.console.exe")
+                _write(templates / f"godot.windows.template_{v}.{arch}{infix}.exe")
+                _write(
+                    templates / f"godot.windows.template_{v}.{arch}{infix}.console.exe"
+                )
 
 
 def _stage_macos(out_dir: Path, *, mono: bool = False) -> None:
@@ -735,3 +743,85 @@ class TestUpstreamGodotDirDefault:
             / f"{_GODOT_BASENAME}_macos.universal.zip"
         )
         assert editor_zip.is_file()
+
+
+class TestDiscoverArchs:
+    """Arch discovery replaces hardcoded arch lists: packaging processes
+    exactly the arches present under out/<platform>/."""
+
+    def test_returns_sorted_arch_dirs(self, tmp_path):
+        plat = tmp_path / "out" / "linux"
+        for arch in ("x86_64", "arm64", "x86_32"):
+            (plat / arch / "tools").mkdir(parents=True)
+        assert packager._discover_archs(plat) == ["arm64", "x86_32", "x86_64"]
+
+    def test_missing_platform_dir_yields_empty(self, tmp_path):
+        assert packager._discover_archs(tmp_path / "out" / "nope") == []
+
+    def test_ignores_non_directory_entries(self, tmp_path):
+        plat = tmp_path / "out" / "linux"
+        (plat / "x86_64").mkdir(parents=True)
+        (plat / "stray.txt").write_text("x")
+        assert packager._discover_archs(plat) == ["x86_64"]
+
+
+class TestWindowsLlvmInfix:
+    """Regression net for the Windows arm64 ``.llvm`` toolchain infix.
+
+    Real arm64 builds use llvm-mingw (``use_llvm=yes``), so Godot names the
+    binary ``godot.windows.editor.arm64.llvm.exe``. The packager previously
+    hardcoded ``godot.windows.editor.{arch}.exe`` and silently skipped arm64
+    ("missing or empty") even though the artifacts were present — the arm64
+    editor/templates never reached a real multi-platform Release. These tests
+    pin both the helper and the end-to-end packaging of arm64 assets.
+    """
+
+    def test_infix_helper(self):
+        assert packager._windows_bin_infix("arm64") == ".llvm"
+        assert packager._windows_bin_infix("x86_64") == ""
+        assert packager._windows_bin_infix("x86_32") == ""
+
+    def test_arm64_llvm_classical_and_mono_packaged(self, basedir, upstream_godot):
+        # Only arm64 present, staged with the real ".llvm" infix.
+        out_dir = basedir / "out"
+        _stage_windows(out_dir, mono=False, archs=("arm64",))
+        _stage_windows(out_dir, mono=True, archs=("arm64",))
+        _stage_upstream_apple(upstream_godot)
+
+        rc = packager.package_release(
+            basedir=basedir,
+            godot_version=_GODOT_VERSION,
+            godot_version_status=_STATUS,
+            upstream_godot_dir=upstream_godot,
+        )
+
+        assert rc == 0
+        release_dir = basedir / "releases" / _BINARIES_VERSION
+        # The published names stay toolchain-agnostic (winarm64, no ".llvm").
+        assert (release_dir / f"{_GODOT_BASENAME}_winarm64.exe.zip").is_file()
+        assert (
+            release_dir / "mono" / f"{_GODOT_BASENAME}_mono_winarm64.zip"
+        ).is_file()
+
+    def test_arm64_templates_staged_without_llvm_in_dest(self, basedir, upstream_godot):
+        # arm64 template exes must land in the tpz staging under the
+        # toolchain-agnostic name windows_{release,debug}_arm64[_console].exe.
+        out_dir = basedir / "out"
+        _stage_windows(out_dir, mono=False, archs=("arm64",))
+        _stage_upstream_apple(upstream_godot)
+
+        rc = packager.package_release(
+            basedir=basedir,
+            godot_version=_GODOT_VERSION,
+            godot_version_status=_STATUS,
+            upstream_godot_dir=upstream_godot,
+        )
+        assert rc == 0
+        tpz = basedir / "releases" / _BINARIES_VERSION / f"{_GODOT_BASENAME}_export_templates.tpz"
+        assert tpz.is_file()
+        with zipfile.ZipFile(tpz) as zf:
+            names = set(zf.namelist())
+        assert "templates/windows_release_arm64.exe" in names
+        assert "templates/windows_debug_arm64.exe" in names
+        # No ".llvm" should leak into the packaged template names.
+        assert not any(".llvm" in n for n in names)

@@ -14,15 +14,16 @@ file:
 ## Table of Contents
 
 1. [Quick Start](#quick-start)
-2. [CLI Reference](#cli-reference)
-3. [config.toml Key Reference](#configtoml-key-reference)
-4. [Android signing](#android-signing)
-5. [Android native debug symbols](#android-native-debug-symbols)
-6. [Upstream Submodules](#upstream-submodules)
-7. [Resumability](#resumability)
-8. [Known limitations](#known-limitations)
-9. [Patch System](#patch-system)
-10. [Troubleshooting](#troubleshooting)
+2. [Architecture](#architecture)
+3. [CLI Reference](#cli-reference)
+4. [config.toml Key Reference](#configtoml-key-reference)
+5. [Android signing](#android-signing)
+6. [Android native debug symbols](#android-native-debug-symbols)
+7. [Upstream Submodules](#upstream-submodules)
+8. [Resumability](#resumability)
+9. [Known limitations](#known-limitations)
+10. [Patch System](#patch-system)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -79,7 +80,7 @@ xcode,osx,ios` (or `--type all`); the chain fails loud if it is missing.
 
 ```bash
 # Build every image (base -> linux/windows/android/web/xcode/osx/ios) and push to GHCR.
-uv run python build-godot.py containers --type all --version 4.7 --push
+uv run python build-godot.py containers --type all --version 4.8 --push
 ```
 
 ### Build
@@ -123,7 +124,7 @@ gh auth status                             # gh must be authenticated for the re
 
 # One command: build the configured matrix, generate Mono glue once, package
 # editor zips + .tpz (classical + mono) + version.txt + SHA512-SUMS.txt,
-# publish a real GitHub Release on tag 4.7-dev1 (prerelease), and push the Mono
+# publish a real GitHub Release on tag 4.8-dev1 (prerelease), and push the Mono
 # NuGet packages (GodotSharp, GodotSharpEditor, Godot.SourceGenerators,
 # Godot.NET.Sdk) to GitHub Packages.
 # Omit --jobs to use the nproc-2 default; pass it to override (e.g. lower for
@@ -157,9 +158,14 @@ same way conceptually: `gh release upload ... --clobber` replaces same-named
 assets when the Release already exists. Disable the NuGet overwrite with
 `--no-nuget-overwrite` (push then skips existing versions via `--skip-duplicate`).
 
-Resumable / partial runs:
+Per-platform / resumable / partial runs:
 
 ```bash
+# Build + publish ONE platform (others come in later runs; the Release grows
+# additively). Only the linux image is acquired — if it is present locally
+# (e.g. built or retagged but not yet pushed to GHCR) it is used without a pull.
+uv run python build-godot.py release --platform linux --jobs 14
+
 # Re-publish without rebuilding (e.g. after a transient gh/nuget failure → exit 5)
 uv run python build-godot.py release --no-build --no-package --upload
 
@@ -169,6 +175,18 @@ uv run python build-godot.py release --no-upload --no-nuget
 # Push only the NuGet packages from an existing build (skip the Release upload)
 uv run python build-godot.py release --no-build --no-package --no-upload --nuget
 ```
+
+> **Per-platform releases.** `release --platform <p>` scopes only the *build*.
+> Packaging and publishing always process the union of everything present in
+> `out/` (resumability preserves previously built platforms), so a `--platform
+> linux` run followed later by `--platform windows` yields a Release carrying
+> both — the second run adds to the first rather than replacing it. Images are
+> acquired only for the scoped platform(s), and an image already present in the
+> local Docker store is used as-is (no pull), so you can drive the first Release
+> of a new version from a locally built or retagged image before it is pushed to
+> the registry. When a single arch-scoping-capable platform (currently `linux`)
+> is scoped, its `[[platforms]].archs` restrict the arch matrix — set
+> `archs = ["x86_64"]` for a fast first build, then widen it.
 
 #### Consuming the published packages
 
@@ -200,6 +218,74 @@ the device config by source name).
 
 ---
 
+## Architecture
+
+The guiding principle is **do not fight the upstream Godot build system**. This
+repo *orchestrates, automates, packages, and publishes* Godot builds; it is not
+an alternative build system. Wherever upstream already defines something (a
+dependency version, an engine version, a build recipe), we consume it rather
+than copy it, so rebasing onto a future Godot release stays cheap.
+
+### Repository layout
+
+| Path | Role |
+|---|---|
+| `build-godot.py` | CLI entry point — parses args, wires the `build` / `release` / `containers` sub-commands. |
+| `scripts/platforms.py` | **Single source of truth for the platform matrix** — image basename, Docker-required, arch-scoping, container dep mounts, extra env, per one immutable `Platform` record. |
+| `scripts/config.py` | Loads + validates `config.toml`; rejects secret keys. |
+| `scripts/host_orchestrator.py` | Host-side build driver: acquire images, download deps, make the source tarball, generate Mono glue once, run per-platform container passes (resumability-gated). |
+| `scripts/in_container/build_<platform>.py` | Runs inside each container: the SCons matrix + gradle/lipo/etc. for that platform. |
+| `scripts/scons_args.py` | Derives SCons invocations from the `flavor × kind × mono × arch` matrix. |
+| `scripts/packager.py` | Turns `out/<plat>/<arch>/…` into editor zips, `.tpz` bundles, and `SHA512-SUMS`. Discovers built arches from `out/` rather than a hardcoded list. |
+| `scripts/orchestrator.py` | Release publishing: `gh release` upload + GitHub Packages NuGet push. |
+| `scripts/container_builder.py` | Builds/pushes the Docker images from `containers/Dockerfile.*`. |
+| `upstream/godot` | The engine source (a fork submodule) — also the authority for dependency + engine versions. |
+| `upstream/{godot-build-scripts,build-containers}` | Upstream reference submodules for cherry-picking; **not** on the build path. |
+
+### Build → package → publish flow
+
+```
+release ─▶ host_orchestrator.run_build   (deps + tarball + mono glue + per-platform container passes)
+        ─▶ packager.package_release       (discover out/ arches → zips + .tpz + SHA512-SUMS)
+        ─▶ orchestrator.publish_release   (gh release) + publish_nupkgs (NuGet)
+```
+
+`release --platform <p>` scopes only the **build**; packaging and publishing
+always reflect the union of whatever is in `out/`, so scoped runs *add to* a
+Release rather than replacing it. The `build` sub-command is the lighter
+per-platform SCons path (no glue/deps/tarball) for local iteration.
+
+### Single source of truth
+
+Nothing that upstream already pins is duplicated here:
+
+- **Engine version** → derived from `upstream/godot/version.py` (drives the
+  release tag, filenames, and `version.txt` — cannot drift from the binary).
+- **Dependency versions** (AccessKit, ANGLE, WinRT, Swappy) → read at build
+  time from the engine's own `upstream/godot/misc/scripts/install_*.py` pins; a
+  `deps/<dep>/.dep-version` marker refreshes a stale local copy. Mesa NIR /
+  D3D12 come from running the engine's `install_d3d12_sdk_windows.py`. Only
+  MoltenVK (no engine installer) stays pinned in the orchestrator.
+- **Platform facts** → `scripts/platforms.py`.
+- **Build matrix + per-platform image/archs** → `config.toml`.
+
+### Extension points
+
+- **Add a platform:** add one `Platform(...)` line to `scripts/platforms.py`
+  and a matching `[[platforms]]` entry to `config.toml`; add an
+  `scripts/in_container/build_<name>.py`. No changes to the orchestrator,
+  packager CLI, or release path are required.
+- **Add / bump a dependency:** if the engine ships an `install_*.py` for it,
+  read the version from there (see `_engine_install_version`) instead of
+  hardcoding.
+- **Change the arch set for a platform:** edit `[[platforms]].archs` in
+  `config.toml`; the build scopes to it and the packager discovers whatever was
+  produced.
+- **Patch the engine source:** drop `*.patch` files in `patches/` (see
+  [Patch System](#patch-system)).
+
+---
+
 ## CLI Reference
 
 ### Top-level
@@ -217,12 +303,11 @@ uv run python build-godot.py build [OPTIONS]
 | Flag | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `--platform` | `str` (comma-separated) | **Yes** | — | Target platform(s): `linux`, `windows`, `android`, `web`, `macos`, `ios`, or `all`. Multiple values are comma-separated, e.g. `linux,windows`. |
-| `--flavor` | `str` (comma-separated) | No | from `[build].flavors` | `release`, `debug`, `release_debug`. Replaces `--target` for flavor selection. |
+| `--flavor` | `str` (comma-separated) | No | from `[build].flavors` | `release`, `debug`, `release_debug`. |
 | `--kind` | `str` (comma-separated) | No | from `[build].kinds` | `editor`, `templates`. |
 | `--mono` | `str` | No | from `[build].mono` | `on`, `off`, or `both`. |
 | `--arch` | `str` (comma-separated) | No | from `[[platforms]].archs` | Restrict the arch matrix for a faster partial build. |
 | `--jobs` | `int` | No | `[build].build_jobs` (nproc - 2) | SCons `-j` parallelism. |
-| `--target` | `str` | No | _deprecated_ | Escape hatch: bypasses flavor/kind/mono derivation and is passed to SCons verbatim. |
 | `--godot-repo` | `str` | No | `nongvantinh/godot` | GitHub slug of the Godot source repo. Pass `official` or `godotengine/godot` to use upstream. When `upstream/godot/` is initialised, its pinned commit is used directly. |
 | `--config` | `path` | No | `./config.toml` | Path to the TOML configuration file. |
 | `--verbose` | flag | No | off | Enable DEBUG-level logging. |
@@ -239,12 +324,13 @@ uv run python build-godot.py release [OPTIONS]
 | Flag | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `--config` | `path` | No | `./config.toml` | Path to the TOML configuration file. |
+| `--platform` | `str` (comma-separated) | No | `all` | Platform(s) to build for this Release: `linux`, `windows`, `android`, `web`, `macos`, `ios`, or `all`. Only the scoped platforms are built; packaging and publishing reflect the union of everything in `out/`, so a scoped run **adds to** the Release instead of replacing it. When a single arch-scoping-capable platform (currently `linux`) is selected, its `[[platforms]].archs` restrict the arch matrix. |
 | `--build` / `--no-build` | flag | No | `--build` | Run the SCons builds, or reuse existing `out/`. |
 | `--package` / `--no-package` | flag | No | `--package` | Run packaging, or reuse existing artifacts. |
 | `--upload` / `--no-upload` | flag | No | from `[release].auto_upload` | Run `gh release` upload, or stop after producing artifacts. |
 | `--nuget` / `--no-nuget` | flag | No | from `[release].publish_nuget` | Push the Mono NuGet packages to GitHub Packages after the Release upload. |
 | `--nuget-overwrite` / `--no-nuget-overwrite` | flag | No | from `[release].nuget_overwrite` (`true`) | Delete an already-published NuGet id+version before pushing so the rebuilt package replaces it (needs `delete:packages`). `--no-nuget-overwrite` skips existing versions instead. |
-| `--tag` | `str` | No | derived from `version.py` (e.g. `4.7.beta`) | Target tag for the Release. One-off override for hotfix re-publishes. |
+| `--tag` | `str` | No | derived from `version.py` (e.g. `4.8.beta`) | Target tag for the Release. One-off override for hotfix re-publishes. |
 | `--jobs` | `int` | No | `[build].build_jobs` (nproc - 2) | SCons `-j` parallelism. |
 | `--godot-repo` | `str` | No | from config | GitHub slug of the Godot source repo. |
 | `--dry-run` | flag | No | off | Print the build/package/`gh` commands without executing them. |
@@ -261,7 +347,7 @@ uv run python build-godot.py containers [OPTIONS]
 | Flag | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `--type` | `str` (comma-separated) | Yes (unless `--extract-sdks-only`) | — | Container type(s): `base`, `linux`, `windows`, `android`, `web`, `xcode`, `osx`, `ios`, or `all`. The Apple chain (`xcode` -> `osx` -> `ios`) needs `containers/files/Xcode_*.xip`. Multiple values are comma-separated. |
-| `--version` | `str` | No | `godot_version` from config | Image version tag, e.g. `4.7`. |
+| `--version` | `str` | No | `godot_version` from config | Image version tag, e.g. `4.8`. |
 | `--push` | flag | No | off | Push images to GHCR after building. Requires `GHCR_PAT` env var; skips gracefully when absent. Mutually exclusive with `--extract-sdks-only`. |
 | `--extract-sdks-only` | flag | No | off | Skip image builds; only run the Apple SDK extraction step from `containers/files/Xcode_*.xip` (requires a built `godot-xcode:<version>` image). Useful for re-running extraction after a partial Apple build. |
 | `--config` | `path` | No | `./config.toml` | Path to the TOML configuration file. |
@@ -286,17 +372,17 @@ automatically included and built before the other types.
 
 ```bash
 # Build only the Linux container image
-uv run python build-godot.py containers --type linux --version 4.7
+uv run python build-godot.py containers --type linux --version 4.8
 
 # Build all images and push them to GHCR
 export GHCR_PAT=<your-github-personal-access-token>
-uv run python build-godot.py containers --type all --version 4.7 --push
+uv run python build-godot.py containers --type all --version 4.8 --push
 
 # Build multiple types without pushing
-uv run python build-godot.py containers --type linux,windows --version 4.7
+uv run python build-godot.py containers --type linux,windows --version 4.8
 
 # Dry run — print Docker commands without executing them
-uv run python build-godot.py containers --type all --version 4.7 --dry-run
+uv run python build-godot.py containers --type all --version 4.8 --dry-run
 ```
 
 ---
@@ -316,10 +402,10 @@ uv run python build-godot.py containers --type all --version 4.7 --dry-run
 
 ```bash
 # Linux editor build (Docker, or local scons if Docker is unavailable)
-uv run python build-godot.py build --platform linux --target editor
+uv run python build-godot.py build --platform linux --kind editor
 
 # Windows export templates (Docker required)
-uv run python build-godot.py build --platform windows --target templates
+uv run python build-godot.py build --platform windows --kind templates
 
 # Multi-platform from the custom fork, non-default config
 uv run python build-godot.py build \
@@ -347,8 +433,8 @@ registry = "ghcr.io"           # Container registry hostname
 username = "nongvantinh"       # Registry username (image path prefix)
 
 # Godot source / version
-godot_version = "4.7"          # Used in SCons flags and image tags
-git_branch = "4.7.dev1"        # Branch/treeish of godot_repo to build
+godot_version = "4.8"          # Used in SCons flags and image tags
+git_branch = "4.8.dev1"        # Branch/treeish of godot_repo to build
 godot_repo = "nongvantinh/godot"  # Fork slug (--godot-repo overrides)
 
 [build]                        # The build matrix (flavor x kind x mono x arch)
@@ -368,25 +454,25 @@ redirect_build_objects = true  # Emit redirect_build_objects=no (upstream align)
 
 [[platforms]]
 name = "linux"
-image = "ghcr.io/nongvantinh/godot-linux:4.7"
+image = "ghcr.io/nongvantinh/godot-linux:4.8"
 scons_flags = "platform=linuxbsd"      # platform-invariant flags only
 archs = ["x86_64", "x86_32", "arm64", "arm32"]
 env_setup = "export PATH=$GODOT_SDK_LINUX_X86_64/bin:$BASE_PATH"
 
 [[platforms]]
 name = "windows"
-image = "ghcr.io/nongvantinh/godot-windows:4.7"
+image = "ghcr.io/nongvantinh/godot-windows:4.8"
 scons_flags = "platform=windows use_mingw=yes mingw_prefix=/root/llvm-mingw"
 archs = ["x86_64", "x86_32", "arm64"]
 
 # ... android, web, macos, ios entries — see config.toml.example ...
 
 [release]
-tag = "4.7-dev1"               # Existing tag the Release attaches to (no `v` prefix)
+tag = "4.8-dev1"               # Existing tag the Release attaches to (no `v` prefix)
 repo = "nongvantinh/godot-build-scripts"
 auto_upload = true             # release sub-command runs gh release upload
 draft = false
-prerelease = true              # 4.7-dev1 is a dev build
+prerelease = true              # 4.8-dev1 is a dev build
 
 [signing]
 android_keystore = ""          # Absolute path to Android keystore (optional; operator-supplied)
@@ -448,7 +534,7 @@ Top-level:
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `tag` | string | — | Existing git tag the Release attaches to (e.g. `4.7-dev1`; matches the live tag — no `v` prefix). |
+| `tag` | string | — | Existing git tag the Release attaches to (e.g. `4.8-dev1`; matches the live tag — no `v` prefix). |
 | `repo` | string | — | Repo slug to publish under (`owner/repo`). |
 | `auto_upload` | bool | `true` | `release` sub-command runs `gh release create/upload`. |
 | `draft` | bool | `false` | Publish as a draft Release. |
@@ -569,17 +655,45 @@ glue regeneration, reuse the cached glue. Delete `mono-glue/` to force.
 
 ## Known limitations
 
-- **Windows arm64 (best-effort)** — the prebuilt ANGLE arm64-LLVM bundle has
-  a libc++ symbol clash with the MinGW toolchain we use. The build script
-  marks the arm64 SCons pass as best-effort; releases ship only Windows
-  x86_64 / x86_32 binaries until ANGLE publishes a rebuild without embedded
-  libc++ symbols.
 - **Web + Mono** — upstream Godot rejects `module_mono_enabled=yes` on the
-  web platform (`modules/mono/config.py:14`). The build script honours the
-  upstream gate and skips the web Mono pass; only the classical web editor
-  is built.
-- **Android editor APK/AAB** — only the `.aar` template library is wired up.
-  The full editor APK/AAB build path is deferred to a follow-up ticket.
+  web platform (`modules/mono/config.py`: the `mono` module aborts when the
+  platform does not list `mono` as `supported`). This is a fundamental engine
+  limitation — Godot has no .NET/C# runtime on WebAssembly — not something the
+  build scripts can resolve. The build honours the upstream gate and skips the
+  web Mono pass; only the classical web editor is built.
+
+Both former limitations below are resolved and **build-validated** — a full
+six-platform 4.8.dev Release (Linux ×4 arch, Windows ×3 arch incl. arm64,
+macOS universal, Android incl. editor, Web, iOS; classical + Mono) has been
+built and published from these scripts:
+
+- **Windows arm64** — *resolved and shipped.* The clash was our host-side ANGLE
+  download drifting to `chromium/6601.2`, whose `arm64-llvm` bundle embedded
+  libc++ symbols that collided with llvm-mingw. Dependency versions are now read
+  from the engine's own `misc/scripts/install_*.py` pins (see below), so ANGLE
+  tracks the rebuild the engine expects (`chromium/7219`) and arm64 builds as a
+  first-class target alongside x86_64 / x86_32. Because arm64 is built with
+  llvm-mingw (`use_llvm=yes`), Godot names its binaries with a `.llvm` infix
+  (`godot.windows.editor.arm64.llvm.exe`); the packager derives that infix via
+  `_windows_bin_infix()` so the arm64 editor/templates package under the
+  toolchain-agnostic `winarm64` asset name (classical **and** Mono).
+- **Android editor APK/AAB** — *resolved and shipped.* The editor build now runs
+  `generateGodotEditor` (+ HorizonOS and PicoOS variants) with native debug
+  symbols and publishes `android_editor.apk` / `.aab`, the HorizonOS/PicoOS
+  APKs, and the editor native-symbols zip — in addition to the export
+  templates (`.apk` / `.aab` / `.aar` / source zip).
+
+### Dependency versions: single source of truth
+
+The host orchestrator does **not** hardcode dependency versions (which is how
+Windows arm64 silently broke). It reads each version at build time from the
+engine's own installer pins under `upstream/godot/misc/scripts/` — `ac_version`
+(AccessKit), `angle_version` (ANGLE), `winrt_version` (WinRT),
+`swappy_tag` (Swappy) — and Mesa NIR / D3D12 come from running the engine's
+`install_d3d12_sdk_windows.py` in-container. A version marker
+(`deps/<dep>/.dep-version`) invalidates a stale local copy when the engine bumps
+a pin. Only MoltenVK, which has no engine installer, stays pinned in the
+orchestrator.
 
 ---
 
@@ -728,7 +842,7 @@ Confirm `containers/files/Xcode_<version>.xip` exists and matches
 `[build].xcode_sdkv`. Then re-run the build with `--extract-sdks-only`:
 
 ```bash
-uv run python build-godot.py containers --extract-sdks-only --version 4.7
+uv run python build-godot.py containers --extract-sdks-only --version 4.8
 ```
 
 ### Resumability false-skip

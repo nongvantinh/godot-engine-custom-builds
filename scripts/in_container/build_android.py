@@ -1,8 +1,9 @@
 """In-container entry point for the Android build container.
 
 Builds Android editor + templates (classical + Mono) across four arches
-(arm32, arm64, x86_32, x86_64), then runs gradle to produce the APK/AAB/AAR
-artifacts.
+(arm32, arm64, x86_32, x86_64), then runs gradle to produce the artifacts:
+the editor APK/AAB (standard + HorizonOS + PicoOS variants, with native debug
+symbols) and the export-template APK/AAB/AAR + source zip.
 
 Env contract:
 
@@ -162,6 +163,47 @@ def _copy_template_outputs(godot_dir: Path, dest: Path, *, mono: bool) -> None:
         shutil.copy2(src, dest / dest_name)
 
 
+def _copy_editor_outputs(godot_dir: Path, dest: Path, *, store_release: str) -> None:
+    """Copy the Android *editor* APK/AAB (+ HorizonOS/PicoOS APKs + native
+    symbols) that ``generateGodotEditor`` produced into ``dest``.
+
+    gradle names the artifacts ``android_editor-<platform>-<release|debug>.*``
+    depending on whether a signing keystore was provided (``store_release``);
+    the native symbols zip is likewise ``android-editor-<release|debug>-...``.
+    Missing artifacts are a WARNING, not fatal — the templates still publish.
+    """
+    suffix = "release" if store_release == "yes" else "debug"
+    dest.mkdir(parents=True, exist_ok=True)
+    bin_dir = godot_dir / "bin"
+    editor_builds = bin_dir / "android_editor_builds"
+    pairs = (
+        (
+            bin_dir / f"android-editor-{suffix}-native-symbols.zip",
+            "android_editor_native_debug_symbols.zip",
+        ),
+        (editor_builds / f"android_editor-android-{suffix}.apk", "android_editor.apk"),
+        (editor_builds / f"android_editor-android-{suffix}.aab", "android_editor.aab"),
+        (
+            editor_builds / f"android_editor-horizonos-{suffix}.apk",
+            "android_editor_horizonos.apk",
+        ),
+        (
+            editor_builds / f"android_editor-picoos-{suffix}.apk",
+            "android_editor_picoos.apk",
+        ),
+    )
+    for src, dest_name in pairs:
+        if not src.is_file():
+            logger.warning(
+                "Android editor artifact %s missing; skipping copy to %s.",
+                src,
+                dest_name,
+            )
+            continue
+        shutil.copy2(src, dest / dest_name)
+        logger.info("Copied Android editor artifact -> %s", dest / dest_name)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     del argv
     logging.basicConfig(
@@ -205,6 +247,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if classical:
             logger.info("Starting classical build for Android...")
+            # Editor: build every arch with native debug symbols (the last arch,
+            # x86_64, additionally emits the separate-symbols zip that covers all
+            # editor archs — same gating as the templates pass).
             for arch in _ARCHS:
                 common.run_scons(
                     "platform=android",
@@ -212,13 +257,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                     *_OPTIONS,
                     "target=editor",
                     f"store_release={store_release}",
+                    *_release_symbol_flags(arch),
                     num_cores=num_cores,
                     env=env,
                     cwd=godot_dir,
                 )
 
+            # Assemble the editor APK/AAB: the standard Android editor plus the
+            # HorizonOS and PicoOS variants, then copy the built artifacts out.
             common.gradle_wrapper(godot_dir, "generateGodotEditor")
-            (out_root / "tools").mkdir(parents=True, exist_ok=True)
+            common.gradle_wrapper(godot_dir, "generateGodotHorizonOSEditor")
+            common.gradle_wrapper(godot_dir, "generateGodotPicoOSEditor")
+            _copy_editor_outputs(
+                godot_dir, out_root / "tools", store_release=store_release
+            )
 
             # Restart from a clean tarball, as we'll copy all the contents
             # outside the container for the MavenCentral upload.

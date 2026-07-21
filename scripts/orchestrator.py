@@ -70,16 +70,21 @@ def dispatch_build(
     registry: str,
     username: str,
     container_version: str,
+    platforms: list[str] | None = None,
+    build_archs: list[str] | None = None,
     dry_run: bool = False,
 ) -> int:
     """Drive the host orchestrator to build the matrix in-process.
 
     Delegates to :func:`scripts.host_orchestrator.run_build` — generate the
-    Mono glue once, pull images, run per-platform docker passes with the
-    resumability gate. Apple targets (macos/ios) are always attempted; the
-    in-container build emits a clear error if its toolchain is not set up.
+    Mono glue once, acquire images, run per-platform docker passes with the
+    resumability gate. *platforms* (``None`` = all six) scopes the run to a
+    subset; *build_archs* (``None`` = all) restricts the in-container arch
+    matrix. Within the scoped set, Apple targets (macos/ios) are always
+    attempted; the in-container build emits a clear error if its toolchain is
+    not set up.
 
-    *container_version* is the Godot version (e.g. ``"4.7"``) and resolves
+    *container_version* is the Godot version (e.g. ``"4.8"``) and resolves
     image refs as ``{registry}/{username}/godot-<plat>:{container_version}``
     — matching what ``containers --push`` produces and what ``config.toml``
     declares. It must be threaded here because the build resolves images
@@ -104,6 +109,8 @@ def dispatch_build(
         upstream_godot_dir=upstream_godot_dir,
         build_type=build_type,
         num_cores=num_cores,
+        platforms=platforms,
+        build_archs=build_archs,
         dry_run=dry_run,
     )
 
@@ -129,7 +136,7 @@ def package_release(
         ``build-godot-and-templates/`` — the dir holding ``out/`` /
         ``releases/`` / ``deps/`` etc.
     godot_version
-        Engine version (``major.minor[.patch]``), e.g. ``"4.7"``.
+        Engine version (``major.minor[.patch]``), e.g. ``"4.8"``.
     godot_version_status
         Engine pre-release status from ``upstream/godot/version.py``, e.g.
         ``"beta"``. This is the SINGLE source of truth: it drives both the
@@ -487,7 +494,7 @@ def read_nupkg_identity(nupkg: Path) -> tuple[str, str]:
 
     A ``.nupkg`` is a zip archive containing exactly one ``<id>.nuspec`` at its
     root. Both the package id (``Godot.NET.Sdk``) and the version
-    (``4.7.0-beta``) contain dots, so parsing them out of the *filename* is
+    (``4.8.0-beta``) contain dots, so parsing them out of the *filename* is
     ambiguous; reading the nuspec is unambiguous. The nuspec uses a default XML
     namespace, so tags are matched by local name.
 

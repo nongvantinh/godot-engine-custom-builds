@@ -55,6 +55,24 @@ class TestEnvNumCores:
         assert common.env_num_cores(default=2) == 2
 
 
+class TestEnvBuildArchs:
+    def test_returns_none_when_unset(self, monkeypatch):
+        monkeypatch.delenv("GODOT_BUILD_ARCHS", raising=False)
+        assert common.env_build_archs() is None
+
+    def test_returns_none_when_empty(self, monkeypatch):
+        monkeypatch.setenv("GODOT_BUILD_ARCHS", "  ")
+        assert common.env_build_archs() is None
+
+    def test_parses_single_arch(self, monkeypatch):
+        monkeypatch.setenv("GODOT_BUILD_ARCHS", "x86_64")
+        assert common.env_build_archs() == {"x86_64"}
+
+    def test_parses_csv_and_strips(self, monkeypatch):
+        monkeypatch.setenv("GODOT_BUILD_ARCHS", " x86_64 , arm64 ")
+        assert common.env_build_archs() == {"x86_64", "arm64"}
+
+
 # ---------------------------------------------------------------------------
 # run_scons
 # ---------------------------------------------------------------------------
@@ -116,15 +134,15 @@ def _make_tarball(path: Path, members: dict[str, str]) -> None:
 class TestExtractTarball:
     def test_strips_leading_component(self, tmp_path):
         tar = tmp_path / "src.tar.gz"
-        _make_tarball(tar, {"godot-4.7/version.py": "x", "godot-4.7/SConstruct": "y"})
+        _make_tarball(tar, {"godot-4.8/version.py": "x", "godot-4.8/SConstruct": "y"})
 
         dest = tmp_path / "out"
         common.extract_tarball(tar, dest, strip_components=1)
 
         assert (dest / "version.py").read_text() == "x"
         assert (dest / "SConstruct").read_text() == "y"
-        # The "godot-4.7/" prefix is stripped — no nested dir.
-        assert not (dest / "godot-4.7").exists()
+        # The "godot-4.8/" prefix is stripped — no nested dir.
+        assert not (dest / "godot-4.8").exists()
 
     def test_raises_for_missing_tarball(self, tmp_path):
         with pytest.raises(common.InContainerBuildError):
@@ -134,7 +152,7 @@ class TestExtractTarball:
 class TestSetupGodotSource:
     def test_removes_stale_tree_and_extracts(self, tmp_path):
         tar = tmp_path / "godot.tar.gz"
-        _make_tarball(tar, {"godot-4.7/version.py": "v"})
+        _make_tarball(tar, {"godot-4.8/version.py": "v"})
 
         # Pre-existing godot/ with junk should be wiped.
         stale = tmp_path / "root" / "godot"

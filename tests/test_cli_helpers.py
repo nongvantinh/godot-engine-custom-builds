@@ -205,6 +205,7 @@ class TestAppleAlwaysBuilds:
 def _release_args(config_path, **overrides) -> argparse.Namespace:
     base = dict(
         config=config_path,
+        platform="all",
         do_build=False,
         do_package=False,
         do_upload=True,
@@ -428,6 +429,59 @@ class TestReleaseAppleAlwaysBuilds:
         assert rc == 0
         apple_gate_kwargs = [k for k in captured["kwargs"] if "apple" in k.lower()]
         assert apple_gate_kwargs == []
+
+    def test_release_scopes_build_to_requested_platform_and_archs(
+        self, cli, tmp_path
+    ):
+        # A single-platform scope threads the platform filter AND that
+        # platform's configured archs into dispatch_build (arch scoping is a
+        # Linux capability today).
+        cfg = tmp_path / "config.toml"
+        cfg.write_text(
+            'registry = "ghcr.io"\n'
+            'username = "testuser"\n'
+            'godot_version = "4.8"\n\n'
+            "[[platforms]]\n"
+            'name = "linux"\n'
+            'image = "ghcr.io/test/linux:4.8"\n'
+            'scons_flags = "platform=linuxbsd"\n'
+            'archs = ["x86_64"]\n',
+            encoding="utf-8",
+        )
+        captured = {}
+
+        def fake_build(**kwargs):
+            captured.update(kwargs)
+            return 0
+
+        args = _release_args(
+            str(cfg), platform="linux", do_build=True, do_upload=False
+        )
+        with mock.patch.object(cli, "dispatch_build", side_effect=fake_build):
+            rc = cli.cmd_release(args)
+
+        assert rc == 0
+        assert captured["platforms"] == ["linux"]
+        assert captured["build_archs"] == ["x86_64"]
+
+    def test_release_multi_platform_scope_keeps_all_archs(self, cli, config_path):
+        # More than one platform -> build_archs is None (a single env cannot
+        # express per-platform arch scopes).
+        captured = {}
+
+        def fake_build(**kwargs):
+            captured.update(kwargs)
+            return 0
+
+        args = _release_args(
+            config_path, platform="linux,windows", do_build=True, do_upload=False
+        )
+        with mock.patch.object(cli, "dispatch_build", side_effect=fake_build):
+            rc = cli.cmd_release(args)
+
+        assert rc == 0
+        assert captured["platforms"] == ["linux", "windows"]
+        assert captured["build_archs"] is None
 
 
 # ---------------------------------------------------------------------------

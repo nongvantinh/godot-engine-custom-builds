@@ -51,11 +51,11 @@ class TestDispatchBuild:
                 build_dir=Path("/tmp/bd"),
                 build_type="all",
                 num_cores=10,
-                git_branch="4.7.dev1",
+                git_branch="4.8.dev1",
                 godot_repo="nongvantinh/godot",
                 registry="ghcr.io",
                 username="nongvantinh",
-                container_version="4.7",
+                container_version="4.8",
                 dry_run=True,
             )
 
@@ -70,11 +70,11 @@ class TestDispatchBuild:
                 build_dir=Path("/tmp/bd"),
                 build_type="mono",
                 num_cores=8,
-                git_branch="4.7.dev1",
+                git_branch="4.8.dev1",
                 godot_repo="nongvantinh/godot",
                 registry="ghcr.io",
                 username="nongvantinh",
-                container_version="4.7",
+                container_version="4.8",
                 dry_run=False,
             )
 
@@ -86,22 +86,22 @@ class TestDispatchBuild:
         # The image-tag scheme is godot-<plat>:<container_version>; the host
         # orchestrator resolves tags before extracting the engine version, so
         # the orchestrator must hand it container_version=<godot_version>
-        # (e.g. "4.7") to match config.toml and `containers --push`.
+        # (e.g. "4.8") to match config.toml and `containers --push`.
         with mock.patch("scripts.orchestrator.host_orchestrator.run_build") as run:
             run.return_value = 0
             dispatch_build(
                 build_dir=Path("/tmp/bd"),
                 build_type="all",
                 num_cores=8,
-                git_branch="4.7.dev1",
+                git_branch="4.8.dev1",
                 godot_repo="nongvantinh/godot",
                 registry="ghcr.io",
                 username="nongvantinh",
-                container_version="4.7",
+                container_version="4.8",
                 dry_run=False,
             )
 
-        assert run.call_args.kwargs["container_version"] == "4.7"
+        assert run.call_args.kwargs["container_version"] == "4.8"
 
     def test_apple_gate_kwarg_is_not_threaded_to_host_orchestrator(self):
         # Apple targets always attempt to build. The host orchestrator no
@@ -112,11 +112,11 @@ class TestDispatchBuild:
                 build_dir=Path("/tmp/bd"),
                 build_type="all",
                 num_cores=10,
-                git_branch="4.7.dev1",
+                git_branch="4.8.dev1",
                 godot_repo="nongvantinh/godot",
                 registry="ghcr.io",
                 username="nongvantinh",
-                container_version="4.7",
+                container_version="4.8",
                 dry_run=False,
             )
 
@@ -133,11 +133,11 @@ class TestDispatchBuild:
                 build_dir=tmp_path / "build-godot-and-templates",
                 build_type="all",
                 num_cores=10,
-                git_branch="4.7.dev1",
+                git_branch="4.8.dev1",
                 godot_repo="nongvantinh/godot",
                 registry="ghcr.io",
                 username="nongvantinh",
-                container_version="4.7",
+                container_version="4.8",
                 dry_run=True,
             )
 
@@ -158,7 +158,7 @@ class TestPackageRelease:
             pr.return_value = 0
             rc = package_release(
                 build_dir=Path("/tmp/bd"),
-                godot_version="4.7",
+                godot_version="4.8",
                 godot_version_status="dev1",
                 dry_run=False,
             )
@@ -167,7 +167,7 @@ class TestPackageRelease:
         pr.assert_called_once()
         kwargs = pr.call_args.kwargs
         assert kwargs["basedir"] == Path("/tmp/bd")
-        assert kwargs["godot_version"] == "4.7"
+        assert kwargs["godot_version"] == "4.8"
         assert kwargs["godot_version_status"] == "dev1"
         assert kwargs["dry_run"] is False
 
@@ -175,7 +175,7 @@ class TestPackageRelease:
         with mock.patch("scripts.orchestrator.packager.package_release") as pr:
             rc = package_release(
                 build_dir=Path("/tmp/bd"),
-                godot_version="4.7",
+                godot_version="4.8",
                 godot_version_status="dev1",
                 dry_run=True,
             )
@@ -188,7 +188,7 @@ class TestPackageRelease:
             pr.return_value = 0
             package_release(
                 build_dir=Path("/tmp/bd"),
-                godot_version="4.7",
+                godot_version="4.8",
                 godot_version_status="dev1",
                 upstream_godot_dir=tmp_path / "godot",
                 dry_run=False,
@@ -207,17 +207,17 @@ class TestCollectReleaseAssets:
         assert collect_release_assets(tmp_path / "nope") == []
 
     def test_collects_files_including_mono_subdir(self, tmp_path):
-        (tmp_path / "Godot_v4.7.dev1_linux.x86_64.zip").write_text("x")
+        (tmp_path / "Godot_v4.8.dev1_linux.x86_64.zip").write_text("x")
         (tmp_path / "SHA512-SUMS.txt").write_text("x")
         mono = tmp_path / "mono"
         mono.mkdir()
-        (mono / "Godot_v4.7.dev1_mono_export_templates.tpz").write_text("x")
+        (mono / "Godot_v4.8.dev1_mono_export_templates.tpz").write_text("x")
 
         assets = collect_release_assets(tmp_path)
 
         names = {p.name for p in assets}
-        assert "Godot_v4.7.dev1_linux.x86_64.zip" in names
-        assert "Godot_v4.7.dev1_mono_export_templates.tpz" in names
+        assert "Godot_v4.8.dev1_linux.x86_64.zip" in names
+        assert "Godot_v4.8.dev1_mono_export_templates.tpz" in names
         assert "SHA512-SUMS.txt" in names
 
 
@@ -229,7 +229,7 @@ class TestCollectReleaseAssets:
 class TestBuildCreateCommand:
     def test_uses_create_with_prerelease(self):
         cmd = build_create_command(
-            tag="v4.7.dev1",
+            tag="v4.8.dev1",
             repo="nongvantinh/godot-build-scripts",
             assets=["/tmp/a.zip"],
             prerelease=True,
@@ -237,14 +237,14 @@ class TestBuildCreateCommand:
         )
 
         assert cmd[:3] == ["gh", "release", "create"]
-        assert "v4.7.dev1" in cmd
+        assert "v4.8.dev1" in cmd
         assert "--prerelease" in cmd
         # `--clobber` is an upload-only flag; the create path must never use it.
         assert "--clobber" not in cmd
 
     def test_includes_draft_flag_when_draft_requested(self):
         cmd = build_create_command(
-            tag="v4.7.dev1",
+            tag="v4.8.dev1",
             repo="r/r",
             assets=["/tmp/a.zip"],
             prerelease=False,
@@ -282,19 +282,19 @@ class TestDisambiguateAssetNames:
 
 class TestBuildReleaseAssetCommands:
     def test_list_assets_command(self):
-        cmd = build_list_release_assets_command(tag="4.7.beta", repo="o/r")
-        assert cmd[:4] == ["gh", "release", "view", "4.7.beta"]
+        cmd = build_list_release_assets_command(tag="4.8.beta", repo="o/r")
+        assert cmd[:4] == ["gh", "release", "view", "4.8.beta"]
         assert cmd[-2:] == ["--jq", ".assets[].name"]
 
     def test_delete_asset_command(self):
         cmd = build_delete_release_asset_command(
-            tag="4.7.beta", repo="o/r", asset_name="x.zip"
+            tag="4.8.beta", repo="o/r", asset_name="x.zip"
         )
         assert cmd == [
             "gh",
             "release",
             "delete-asset",
-            "4.7.beta",
+            "4.8.beta",
             "x.zip",
             "--repo",
             "o/r",
@@ -305,7 +305,7 @@ class TestBuildReleaseAssetCommands:
 class TestClearReleaseAssets:
     def test_dry_run_does_not_invoke_gh(self):
         with mock.patch("scripts.orchestrator.subprocess.run") as run:
-            clear_release_assets(tag="4.7.beta", repo="o/r", dry_run=True)
+            clear_release_assets(tag="4.8.beta", repo="o/r", dry_run=True)
         run.assert_not_called()
 
     def test_noop_when_release_missing(self):
@@ -313,7 +313,7 @@ class TestClearReleaseAssets:
         with mock.patch(
             "scripts.orchestrator.subprocess.run", side_effect=[missing]
         ) as run:
-            clear_release_assets(tag="4.7.beta", repo="o/r", dry_run=False)
+            clear_release_assets(tag="4.8.beta", repo="o/r", dry_run=False)
         assert run.call_count == 1  # only the list call; nothing to delete
 
     def test_deletes_each_existing_asset(self):
@@ -322,7 +322,7 @@ class TestClearReleaseAssets:
         with mock.patch(
             "scripts.orchestrator.subprocess.run", side_effect=[listing, ok, ok]
         ) as run:
-            clear_release_assets(tag="4.7.beta", repo="o/r", dry_run=False)
+            clear_release_assets(tag="4.8.beta", repo="o/r", dry_run=False)
         assert run.call_count == 3
         assert run.call_args_list[1].args[0][:3] == ["gh", "release", "delete-asset"]
 
@@ -333,7 +333,7 @@ class TestClearReleaseAssets:
             "scripts.orchestrator.subprocess.run", side_effect=[listing, fail]
         ):
             with pytest.raises(PublishError, match="Failed to delete existing asset"):
-                clear_release_assets(tag="4.7.beta", repo="o/r", dry_run=False)
+                clear_release_assets(tag="4.8.beta", repo="o/r", dry_run=False)
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +347,7 @@ class TestPublishRelease:
         asset.write_text("x")
         with mock.patch("scripts.orchestrator.subprocess.run") as run:
             publish_release(
-                tag="v4.7.dev1",
+                tag="v4.8.dev1",
                 repo="r/r",
                 assets=[asset],
                 prerelease=True,
@@ -361,7 +361,7 @@ class TestPublishRelease:
         with mock.patch("scripts.orchestrator._gh_available", return_value=True):
             with pytest.raises(PublishError, match="No release assets"):
                 publish_release(
-                    tag="v4.7.dev1",
+                    tag="v4.8.dev1",
                     repo="r/r",
                     assets=[],
                     prerelease=True,
@@ -375,7 +375,7 @@ class TestPublishRelease:
         with mock.patch("scripts.orchestrator._gh_available", return_value=False):
             with pytest.raises(PublishError, match="gh CLI not found"):
                 publish_release(
-                    tag="v4.7.dev1",
+                    tag="v4.8.dev1",
                     repo="r/r",
                     assets=[asset],
                     prerelease=True,
@@ -396,7 +396,7 @@ class TestPublishRelease:
         ):
             with pytest.raises(PublishError, match="gh release"):
                 publish_release(
-                    tag="v4.7.dev1",
+                    tag="v4.8.dev1",
                     repo="r/r",
                     assets=[asset],
                     prerelease=True,
@@ -414,7 +414,7 @@ class TestPublishRelease:
         ):
             run.return_value = subprocess.CompletedProcess([], 0)
             publish_release(
-                tag="v4.7.dev1",
+                tag="v4.8.dev1",
                 repo="r/r",
                 assets=[asset],
                 prerelease=True,
@@ -438,7 +438,7 @@ class TestPublishRelease:
         ):
             run.return_value = subprocess.CompletedProcess([], 0)
             publish_release(
-                tag="4.7.beta",
+                tag="4.8.beta",
                 repo="r/r",
                 assets=[asset],
                 prerelease=True,
@@ -509,7 +509,7 @@ class TestCollectNupkgs:
         assert collect_nupkgs(tmp_path) == []
 
     def test_deduplicates_by_filename_across_platforms(self, tmp_path):
-        pkgs = ["GodotSharp.4.7.0-beta.nupkg", "Godot.NET.Sdk.4.7.0-beta.nupkg"]
+        pkgs = ["GodotSharp.4.8.0-beta.nupkg", "Godot.NET.Sdk.4.8.0-beta.nupkg"]
         for plat, arch in (("linux", "x86_64"), ("windows", "x86_64"), ("macos", "")):
             _make_nupkgs(tmp_path, plat, arch or "tools-host", pkgs)
 
@@ -523,16 +523,16 @@ class TestCollectNupkgs:
             tmp_path,
             "linux",
             "x86_64",
-            ["GodotSharp.4.7.0-beta.nupkg", "GodotSharp.4.7.0-beta.snupkg"],
+            ["GodotSharp.4.8.0-beta.nupkg", "GodotSharp.4.8.0-beta.snupkg"],
         )
         result = collect_nupkgs(tmp_path)
-        assert [p.name for p in result] == ["GodotSharp.4.7.0-beta.nupkg"]
+        assert [p.name for p in result] == ["GodotSharp.4.8.0-beta.nupkg"]
 
     def test_prefers_linux_x86_64_canonical_source(self, tmp_path):
         # windows created first (alphabetically earlier in some orders); the
         # linux/x86_64 copy must still win as the canonical source.
-        _make_nupkgs(tmp_path, "windows", "arm64", ["GodotSharp.4.7.0-beta.nupkg"])
-        _make_nupkgs(tmp_path, "linux", "x86_64", ["GodotSharp.4.7.0-beta.nupkg"])
+        _make_nupkgs(tmp_path, "windows", "arm64", ["GodotSharp.4.8.0-beta.nupkg"])
+        _make_nupkgs(tmp_path, "linux", "x86_64", ["GodotSharp.4.8.0-beta.nupkg"])
 
         result = collect_nupkgs(tmp_path)
 
@@ -630,9 +630,9 @@ def _make_real_nupkg(path: Path, pkg_id: str, version: str) -> Path:
 class TestReadNupkgIdentity:
     def test_reads_id_and_version_from_nuspec(self, tmp_path):
         pkg = _make_real_nupkg(
-            tmp_path / "Godot.NET.Sdk.4.7.0-beta.nupkg", "Godot.NET.Sdk", "4.7.0-beta"
+            tmp_path / "Godot.NET.Sdk.4.8.0-beta.nupkg", "Godot.NET.Sdk", "4.8.0-beta"
         )
-        assert read_nupkg_identity(pkg) == ("Godot.NET.Sdk", "4.7.0-beta")
+        assert read_nupkg_identity(pkg) == ("Godot.NET.Sdk", "4.8.0-beta")
 
     def test_raises_when_no_nuspec(self, tmp_path):
         pkg = tmp_path / "broken.nupkg"
@@ -672,7 +672,7 @@ class TestDeleteNupkgVersions:
 
     def test_dry_run_does_not_invoke_gh(self, tmp_path):
         pkg = _make_real_nupkg(
-            tmp_path / "GodotSharp.4.7.0-beta.nupkg", "GodotSharp", "4.7.0-beta"
+            tmp_path / "GodotSharp.4.8.0-beta.nupkg", "GodotSharp", "4.8.0-beta"
         )
         with mock.patch("scripts.orchestrator.subprocess.run") as run:
             delete_nupkg_versions(
@@ -682,7 +682,7 @@ class TestDeleteNupkgVersions:
 
     def test_raises_when_gh_unavailable(self, tmp_path):
         pkg = _make_real_nupkg(
-            tmp_path / "GodotSharp.4.7.0-beta.nupkg", "GodotSharp", "4.7.0-beta"
+            tmp_path / "GodotSharp.4.8.0-beta.nupkg", "GodotSharp", "4.8.0-beta"
         )
         with mock.patch("scripts.orchestrator._gh_available", return_value=False):
             with pytest.raises(PublishError, match="gh CLI not found"):
@@ -692,7 +692,7 @@ class TestDeleteNupkgVersions:
 
     def test_raises_when_api_key_missing(self, tmp_path):
         pkg = _make_real_nupkg(
-            tmp_path / "GodotSharp.4.7.0-beta.nupkg", "GodotSharp", "4.7.0-beta"
+            tmp_path / "GodotSharp.4.8.0-beta.nupkg", "GodotSharp", "4.8.0-beta"
         )
         with mock.patch("scripts.orchestrator._gh_available", return_value=True):
             with pytest.raises(PublishError, match="No GitHub Packages token"):
@@ -702,10 +702,10 @@ class TestDeleteNupkgVersions:
 
     def test_deletes_matching_version(self, tmp_path):
         pkg = _make_real_nupkg(
-            tmp_path / "GodotSharp.4.7.0-beta.nupkg", "GodotSharp", "4.7.0-beta"
+            tmp_path / "GodotSharp.4.8.0-beta.nupkg", "GodotSharp", "4.8.0-beta"
         )
         listing = subprocess.CompletedProcess(
-            [], 0, stdout=json.dumps([{"id": 7, "name": "4.7.0-beta"}, {"id": 1, "name": "4.4.1-stable-.1"}]), stderr=""
+            [], 0, stdout=json.dumps([{"id": 7, "name": "4.8.0-beta"}, {"id": 1, "name": "4.4.1-stable-.1"}]), stderr=""
         )
         deletion = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         with (
@@ -725,7 +725,7 @@ class TestDeleteNupkgVersions:
 
     def test_noop_when_version_absent_from_listing(self, tmp_path):
         pkg = _make_real_nupkg(
-            tmp_path / "GodotSharp.4.7.0-beta.nupkg", "GodotSharp", "4.7.0-beta"
+            tmp_path / "GodotSharp.4.8.0-beta.nupkg", "GodotSharp", "4.8.0-beta"
         )
         listing = subprocess.CompletedProcess(
             [], 0, stdout=json.dumps([{"id": 1, "name": "4.4.1-stable-.1"}]), stderr=""
@@ -744,7 +744,7 @@ class TestDeleteNupkgVersions:
 
     def test_noop_when_package_not_published(self, tmp_path):
         pkg = _make_real_nupkg(
-            tmp_path / "GodotSharp.4.7.0-beta.nupkg", "GodotSharp", "4.7.0-beta"
+            tmp_path / "GodotSharp.4.8.0-beta.nupkg", "GodotSharp", "4.8.0-beta"
         )
         not_found = subprocess.CompletedProcess(
             [], 1, stdout="", stderr="gh: Not Found (HTTP 404)"
@@ -762,7 +762,7 @@ class TestDeleteNupkgVersions:
 
     def test_raises_when_list_fails_hard(self, tmp_path):
         pkg = _make_real_nupkg(
-            tmp_path / "GodotSharp.4.7.0-beta.nupkg", "GodotSharp", "4.7.0-beta"
+            tmp_path / "GodotSharp.4.8.0-beta.nupkg", "GodotSharp", "4.8.0-beta"
         )
         boom = subprocess.CompletedProcess(
             [], 1, stdout="", stderr="gh: Bad credentials (HTTP 401)"
@@ -778,10 +778,10 @@ class TestDeleteNupkgVersions:
 
     def test_raises_when_delete_fails(self, tmp_path):
         pkg = _make_real_nupkg(
-            tmp_path / "GodotSharp.4.7.0-beta.nupkg", "GodotSharp", "4.7.0-beta"
+            tmp_path / "GodotSharp.4.8.0-beta.nupkg", "GodotSharp", "4.8.0-beta"
         )
         listing = subprocess.CompletedProcess(
-            [], 0, stdout=json.dumps([{"id": 7, "name": "4.7.0-beta"}]), stderr=""
+            [], 0, stdout=json.dumps([{"id": 7, "name": "4.8.0-beta"}]), stderr=""
         )
         delete_fail = subprocess.CompletedProcess(
             [], 1, stdout="", stderr="gh: Forbidden (HTTP 403)"

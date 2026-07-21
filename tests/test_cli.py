@@ -350,28 +350,6 @@ class TestCliBuildMatrixFlags:
         assert "module_mono_enabled=yes" in combined
         assert combined.count("target=editor") >= 2
 
-    def test_target_escape_hatch_is_passed_through_verbatim(self, tmp_path):
-        result = subprocess.run(
-            [
-                sys.executable,
-                _SCRIPT,
-                "build",
-                "--platform",
-                "linux",
-                "--target",
-                "template_release",
-                "--config",
-                _write_config(tmp_path),
-                "--dry-run",
-            ],
-            capture_output=True,
-            text=True,
-        )
-
-        combined = result.stdout + result.stderr
-        assert "deprecated" in combined.lower()
-        assert "target=template_release" in combined
-
 
 # ---------------------------------------------------------------------------
 # build — Apple targets always build (no host-side skip / auto-detection)

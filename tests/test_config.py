@@ -679,7 +679,7 @@ class TestReleaseSection:
         toml_file = tmp_path / "config.toml"
         _write_toml(
             toml_file,
-            _MINIMAL_VALID_TOML + '\n[release]\ntag = "4.7.beta"\n',
+            _MINIMAL_VALID_TOML + '\n[release]\ntag = "4.8.beta"\n',
         )
 
         with pytest.raises(ConfigError, match="not configurable"):

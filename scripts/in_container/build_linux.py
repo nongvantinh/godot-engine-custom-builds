@@ -108,12 +108,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     out_root = common.env_out_root()
     mono_glue_src = common.env_mono_glue_dir()
 
+    # Restrict the arch matrix when the Release run is scoped (GODOT_BUILD_ARCHS);
+    # unset means build every arch the container supports.
+    arch_scope = common.env_build_archs()
+    arch_sdk = (
+        _ARCH_SDK
+        if arch_scope is None
+        else tuple(pair for pair in _ARCH_SDK if pair[0] in arch_scope)
+    )
+    if not arch_sdk:
+        logger.error(
+            "GODOT_BUILD_ARCHS=%s selects no Linux arch (supported: %s).",
+            ",".join(sorted(arch_scope or set())),
+            ", ".join(a for a, _ in _ARCH_SDK),
+        )
+        return 1
+    if arch_scope is not None:
+        logger.info("Arch scope: %s", ", ".join(a for a, _ in arch_sdk))
+
     try:
         godot_dir = common.setup_godot_source()
 
         if classical:
             logger.info("Starting classical build for Linux...")
-            for arch, sdk_var in _ARCH_SDK:
+            for arch, sdk_var in arch_sdk:
                 env = _arch_env(arch, sdk_var)
 
                 common.run_scons(
@@ -151,7 +169,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             logger.info("Starting Mono build for Linux...")
             common.copy_mono_glue(mono_glue_src, godot_dir, include_editor=True)
 
-            for arch, sdk_var in _ARCH_SDK:
+            for arch, sdk_var in arch_sdk:
                 env = _arch_env(arch, sdk_var)
 
                 common.run_scons(

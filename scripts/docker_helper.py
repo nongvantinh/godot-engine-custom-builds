@@ -12,6 +12,7 @@ import shutil
 import subprocess
 
 from scripts.config import ConfigError
+from scripts.proc import run_or_raise
 
 logger = logging.getLogger(__name__)
 
@@ -64,12 +65,11 @@ def pull_image(image: str, dry_run: bool = False) -> None:
         logger.info("[dry-run] Would run: %s", " ".join(cmd))
         return
     logger.info("Pulling image: %s", image)
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise BuildError(
-            f"Failed to pull image '{image}': docker exited {exc.returncode}"
-        ) from exc
+    run_or_raise(
+        cmd,
+        error_cls=BuildError,
+        error_message=f"Failed to pull image '{image}': docker exited {{returncode}}",
+    )
 
 
 def run_build(
@@ -138,12 +138,11 @@ def run_build(
 
     logger.info("Running build in container %s", image)
     logger.debug("Full command: %s", " ".join(cmd))
-    try:
-        result = subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise BuildError(
-            f"Build container '{image}' exited unexpectedly: {exc.returncode}"
-        ) from exc
+    result = run_or_raise(
+        cmd,
+        error_cls=BuildError,
+        error_message=f"Build container '{image}' exited unexpectedly: {{returncode}}",
+    )
     return result.returncode
 
 
@@ -185,9 +184,9 @@ def login(registry: str, username: str, dry_run: bool = False) -> None:
             "  export GHCR_PAT=<your-token>"
         )
     logger.info("Logging in to %s as %s", registry, username)
-    try:
-        subprocess.run(cmd, input=pat.encode(), check=True)
-    except subprocess.CalledProcessError as exc:
-        raise BuildError(
-            f"docker login to '{registry}' failed: docker exited {exc.returncode}"
-        ) from exc
+    run_or_raise(
+        cmd,
+        error_cls=BuildError,
+        error_message=f"docker login to '{registry}' failed: docker exited {{returncode}}",
+        input=pat.encode(),
+    )

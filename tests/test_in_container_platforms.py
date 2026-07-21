@@ -221,6 +221,48 @@ class TestBuildLinux:
         x86_64_envs = [e for e, a in zip(envs, scons_args) if "arch=x86_64" in a]
         assert all(e["PATH"].startswith("/sdk/x86_64/bin:") for e in x86_64_envs)
 
+    def test_build_archs_scope_restricts_arch_matrix(
+        self, base_env, tmp_path, monkeypatch
+    ):
+        # GODOT_BUILD_ARCHS=x86_64 -> only the x86_64 arch is built.
+        monkeypatch.setenv("GODOT_SDK_LINUX_X86_64", "/sdk/x86_64")
+        monkeypatch.setenv("GODOT_BUILD_ARCHS", "x86_64")
+        base_env.setenv("MONO", "0")
+        godot = tmp_path / "godot"
+        (godot / "bin").mkdir(parents=True)
+
+        with (
+            mock.patch.object(
+                build_linux.common, "setup_godot_source", return_value=godot
+            ),
+            mock.patch.object(
+                build_linux.common, "run_scons", return_value=0
+            ) as run_scons,
+            mock.patch("scripts.in_container.build_linux._copy_bin_and_clean"),
+        ):
+            rc = build_linux.main([])
+
+        assert rc == 0
+        scons_args = _scons_call_args(run_scons)
+        # 1 arch * 3 invocations (editor + template_debug + template_release).
+        assert len(scons_args) == 3
+        assert all("arch=x86_64" in a for a in scons_args)
+        assert not any("arch=arm64" in a for a in scons_args)
+
+    def test_build_archs_scope_with_no_matching_arch_errors(
+        self, base_env, tmp_path, monkeypatch
+    ):
+        # A scope that selects no supported Linux arch fails loud (exit 1) rather
+        # than silently building nothing.
+        monkeypatch.setenv("GODOT_BUILD_ARCHS", "wasm32")
+        base_env.setenv("MONO", "0")
+
+        with mock.patch.object(build_linux.common, "run_scons") as run_scons:
+            rc = build_linux.main([])
+
+        assert rc == 1
+        run_scons.assert_not_called()
+
     def test_mono_one_requires_glue_and_runs_assemblies(
         self, base_env, tmp_path, monkeypatch
     ):
@@ -303,16 +345,44 @@ class TestBuildWindows:
         assert order.count("d3d12") == 1
         assert all(step == "scons" for step in order[1:])
 
-    def test_arm64_classical_failure_is_best_effort(self, base_env, tmp_path, caplog):
+    def test_arm64_is_first_class_with_llvm_and_winrt(self, base_env, tmp_path):
+        # arm64 is a first-class Windows target (ANGLE chromium/7219 resolved the
+        # old libc++ clash): it builds with llvm-mingw and the WinRT headers,
+        # alongside x86_64/x86_32 — no best-effort skip.
         base_env.setenv("MONO", "0")
         godot = tmp_path / "godot"
         (godot / "bin").mkdir(parents=True)
 
-        # Simulate scons failing for any arm64 invocation, passing for x86_*.
+        with (
+            mock.patch.object(
+                build_windows.common, "setup_godot_source", return_value=godot
+            ),
+            mock.patch.object(build_windows.common, "install_d3d12_sdk"),
+            mock.patch.object(
+                build_windows.common, "run_scons", return_value=0
+            ) as run_scons,
+            mock.patch.object(build_windows.common, "copy_and_clean_bin"),
+            mock.patch.object(build_windows.common, "clean_bin_preserving"),
+        ):
+            rc = build_windows.main([])
+
+        assert rc == 0
+        arm64_calls = [a for a in _scons_call_args(run_scons) if "arch=arm64" in a]
+        assert arm64_calls, "arm64 must be built as a first-class target"
+        assert all("use_llvm=yes" in a for a in arm64_calls)
+        assert all("winrt_path=/root/winrt" in a for a in arm64_calls)
+
+    def test_arm64_failure_is_now_fatal(self, base_env, tmp_path):
+        # No more best-effort: an arm64 failure aborts the whole Windows build
+        # (exit 1) rather than being swallowed with a warning.
+        base_env.setenv("MONO", "0")
+        godot = tmp_path / "godot"
+        (godot / "bin").mkdir(parents=True)
+
         def fake_scons(*args, **kwargs):
             arch = next((a for a in args if a.startswith("arch=")), "")
             if arch == "arch=arm64":
-                return 1
+                raise build_windows.common.InContainerBuildError("arm64 link failed")
             return 0
 
         with (
@@ -325,15 +395,10 @@ class TestBuildWindows:
             ),
             mock.patch.object(build_windows.common, "copy_and_clean_bin"),
             mock.patch.object(build_windows.common, "clean_bin_preserving"),
-            caplog.at_level("WARNING"),
         ):
             rc = build_windows.main([])
 
-        # Best-effort: failure is non-fatal.
-        assert rc == 0
-        assert any(
-            "arm64 classical Windows build failed" in r.message for r in caplog.records
-        )
+        assert rc == 1
 
     def test_steam_build_runs_when_steam_flag_set(self, base_env, tmp_path):
         base_env.setenv("MONO", "0")
@@ -500,9 +565,60 @@ class TestBuildAndroid:
         args_list = _scons_call_args(run_scons)
         # 4 editor + 8 template (4 archs × 2 targets) = 12 scons invocations.
         assert len(args_list) == 12
-        # Two gradle tasks: generateGodotEditor + generateGodotTemplates.
+        # Editor gradle tasks (standard + HorizonOS + PicoOS) then templates.
         gradle_tasks = [c.args[1] for c in gradle.call_args_list]
-        assert gradle_tasks == ["generateGodotEditor", "generateGodotTemplates"]
+        assert gradle_tasks == [
+            "generateGodotEditor",
+            "generateGodotHorizonOSEditor",
+            "generateGodotPicoOSEditor",
+            "generateGodotTemplates",
+        ]
+        # Editor builds carry native debug symbols like the release templates
+        # (separate-symbols only on the last arch, x86_64).
+        editor_calls = [a for a in args_list if "target=editor" in a]
+        assert len(editor_calls) == 4
+        assert all("debug_symbols=yes" in a for a in editor_calls)
+        sep_editor = [a for a in editor_calls if "separate_debug_symbols=yes" in a]
+        assert len(sep_editor) == 1 and "arch=x86_64" in sep_editor[0]
+
+    def test_copy_editor_outputs_debug_naming(self, tmp_path):
+        # store_release="no" -> gradle emits ...-debug.* artifacts; they land in
+        # out/tools under the canonical published names.
+        godot = tmp_path / "godot"
+        editor_builds = godot / "bin" / "android_editor_builds"
+        editor_builds.mkdir(parents=True)
+        (godot / "bin" / "android-editor-debug-native-symbols.zip").write_text("z")
+        for name in (
+            "android_editor-android-debug.apk",
+            "android_editor-android-debug.aab",
+            "android_editor-horizonos-debug.apk",
+            "android_editor-picoos-debug.apk",
+        ):
+            (editor_builds / name).write_text("bin")
+
+        dest = tmp_path / "out" / "tools"
+        build_android._copy_editor_outputs(godot, dest, store_release="no")
+
+        assert (dest / "android_editor.apk").is_file()
+        assert (dest / "android_editor.aab").is_file()
+        assert (dest / "android_editor_horizonos.apk").is_file()
+        assert (dest / "android_editor_picoos.apk").is_file()
+        assert (dest / "android_editor_native_debug_symbols.zip").is_file()
+
+    def test_copy_editor_outputs_release_naming_and_missing_is_skipped(self, tmp_path):
+        # store_release="yes" -> ...-release.* names; a missing artifact is a
+        # warning-level skip, not a hard failure.
+        godot = tmp_path / "godot"
+        editor_builds = godot / "bin" / "android_editor_builds"
+        editor_builds.mkdir(parents=True)
+        (editor_builds / "android_editor-android-release.apk").write_text("bin")
+
+        dest = tmp_path / "out" / "tools"
+        build_android._copy_editor_outputs(godot, dest, store_release="yes")
+
+        assert (dest / "android_editor.apk").is_file()
+        # Absent artifacts were skipped, not fatal.
+        assert not (dest / "android_editor.aab").exists()
 
     def test_template_release_carries_native_debug_symbol_flags(
         self, base_env, tmp_path

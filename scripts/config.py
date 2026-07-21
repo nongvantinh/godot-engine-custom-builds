@@ -94,7 +94,7 @@ DEFAULT_RELEASE_PUBLISH_NUGET = True
 DEFAULT_RELEASE_NUGET_OVERWRITE = True
 
 # Source defaults.
-DEFAULT_GIT_BRANCH = "4.7.dev1"
+DEFAULT_GIT_BRANCH = "4.8.dev1"
 DEFAULT_GODOT_REPO = "nongvantinh/godot"
 
 
@@ -257,7 +257,7 @@ def _check_release_section(config: dict, path: str) -> None:
     if "tag" in release:
         raise ConfigError(
             f"[release].tag in {path} is not configurable: the release tag is "
-            f"derived from upstream/godot/version.py (e.g. '4.7.beta') so it "
+            f"derived from upstream/godot/version.py (e.g. '4.8.beta') so it "
             f"cannot drift from the engine binary. Remove this key from your "
             f"config.toml. Use the `--tag` CLI flag on the release sub-command "
             f"for one-off hotfix overrides."

@@ -3,8 +3,8 @@
 
 Usage
 -----
-    uv run python build-godot.py build --platform linux --target editor
-    uv run python build-godot.py containers --type linux --version 4.7
+    uv run python build-godot.py build --platform linux --flavor release --kind editor
+    uv run python build-godot.py containers --type linux --version 4.8
     uv run python build-godot.py --help
 
 Exit codes
@@ -24,6 +24,7 @@ import logging
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -49,6 +50,7 @@ from scripts.config import (
     get_scons_config,
     load_config,
 )
+from scripts.console import ResultTable, configure_logging, section
 from scripts.container_builder import build_and_push, extract_apple_sdks
 from scripts.docker_helper import (
     BuildError,
@@ -71,16 +73,23 @@ from scripts.orchestrator import (
     publish_nupkgs,
     publish_release,
 )
+from scripts import platforms
 from scripts.patcher import apply_patches
 from scripts.scons_args import SconsDerivationError, derive_invocations
 
 # ---------------------------------------------------------------------------
-# Supported platforms
+# Supported platforms — derived from the scripts.platforms registry (single
+# source of truth) so platform facts live in exactly one place.
 # ---------------------------------------------------------------------------
-_SUPPORTED_PLATFORMS = {"linux", "windows", "android", "web", "macos", "ios"}
+_SUPPORTED_PLATFORMS = platforms.names()
 
 # Platforms that require Docker (no local fallback available).
-_DOCKER_REQUIRED_PLATFORMS = {"windows", "android", "web", "macos", "ios"}
+_DOCKER_REQUIRED_PLATFORMS = platforms.docker_required_names()
+
+# Platforms whose in-container build honours GODOT_BUILD_ARCHS (arch scoping).
+# Others build every arch their container supports until their in-container
+# script reads the env too.
+_ARCH_SCOPED_PLATFORMS = platforms.arch_scoped_names()
 
 # Default Godot fork slug — operators can override via --godot-repo.
 _DEFAULT_GODOT_REPO = "nongvantinh/godot"
@@ -142,7 +151,6 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FLAVOR[,FLAVOR...]",
         help=(
             "Flavor(s), comma-separated: release, debug, release_debug. "
-            "Replaces --target for flavor selection. "
             "(default: from [build].flavors)"
         ),
     )
@@ -179,15 +187,6 @@ def _build_parser() -> argparse.ArgumentParser:
             "SCons -j parallelism. "
             "(default: from [build].build_jobs = nproc - 2, leaving 2 cores "
             "for the system)"
-        ),
-    )
-    build_p.add_argument(
-        "--target",
-        default=None,
-        metavar="TARGET",
-        help=(
-            "DEPRECATED escape hatch. When supplied it bypasses "
-            "flavor/kind/mono derivation and is passed to SCons verbatim."
         ),
     )
     build_p.add_argument(
@@ -246,7 +245,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="VERSION",
         help=(
-            "Image version tag, e.g. 4.7. "
+            "Image version tag, e.g. 4.8. "
             "Defaults to 'godot_version' from config.toml."
         ),
     )
@@ -294,6 +293,19 @@ def _build_parser() -> argparse.ArgumentParser:
         default="./config.toml",
         metavar="PATH",
         help="Path to the TOML configuration file.  (default: ./config.toml)",
+    )
+    release_p.add_argument(
+        "--platform",
+        default="all",
+        metavar="PLATFORM[,PLATFORM...]",
+        help=(
+            "Platform(s) to build for this Release, comma-separated, or 'all'. "
+            "Only the scoped platforms are built; packaging and publishing "
+            "reflect the union of everything present in out/ (previously built "
+            "platforms are preserved), so a scoped run adds to the Release "
+            "instead of replacing it. When a single platform is scoped, its "
+            "[[platforms]].archs restrict the arch matrix. (default: all)"
+        ),
     )
     release_p.add_argument(
         "--build",
@@ -413,11 +425,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _configure_logging(verbose: bool) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        format="%(levelname)s: %(message)s",
-        level=level,
-    )
+    configure_logging(verbose)
 
 
 # ---------------------------------------------------------------------------
@@ -757,34 +765,25 @@ def cmd_build(args: argparse.Namespace) -> int:
         return 4
 
     # Dispatch builds — stop on first failure.
+    results = ResultTable(
+        "Build summary", ["Platform", "Status", "Detail"], status_column=1
+    )
     for platform in platforms:
-        logger.info("--- Starting build for platform: %s ---", platform)
+        section(f"Building platform: {platform}")
+        started = time.monotonic()
 
-        # Deprecated escape hatch: --target bypasses flavor/kind derivation.
-        if args.target is not None:
-            logger.warning(
-                "--target is deprecated; passing '%s' to SCons verbatim "
-                "and bypassing flavor/kind/mono derivation.",
-                args.target,
+        try:
+            _, scons_commands = _resolve_matrix_for_platform(
+                platform=platform,
+                config=config,
+                flavors=flavors,
+                kinds=kinds,
+                mono_variants=mono_variants,
+                archs_override=archs_override,
             )
-            platform_cfg = get_platform_config(config, platform)
-            platform_flags = platform_cfg["scons_flags"] if platform_cfg else ""
-            scons_commands = [
-                " ".join(f for f in [platform_flags, f"target={args.target}"] if f)
-            ]
-        else:
-            try:
-                _, scons_commands = _resolve_matrix_for_platform(
-                    platform=platform,
-                    config=config,
-                    flavors=flavors,
-                    kinds=kinds,
-                    mono_variants=mono_variants,
-                    archs_override=archs_override,
-                )
-            except SconsDerivationError as exc:
-                logger.error("%s", exc)
-                return 1
+        except SconsDerivationError as exc:
+            logger.error("%s", exc)
+            return 1
 
         try:
             rc = _build_platform(
@@ -797,11 +796,18 @@ def cmd_build(args: argparse.Namespace) -> int:
             )
         except BuildError as exc:
             logger.error("%s", exc)
+            results.add(platform, "failed", str(exc))
+            results.print()
             return 4
+        elapsed = f"{time.monotonic() - started:.1f}s"
         if rc != 0:
+            results.add(platform, "failed", f"exit code {rc}")
+            results.print()
             return rc
+        results.add(platform, "dry-run" if args.dry_run else "ok", elapsed)
         logger.info("--- Build for platform '%s' completed. ---", platform)
 
+    results.print()
     return 0
 
 
@@ -839,6 +845,23 @@ def cmd_release(args: argparse.Namespace) -> int:
     # container_version) so the tags match config.toml / `containers --push`.
     godot_version = config["godot_version"]
 
+    # Scope the Release to the requested platform(s). Packaging/publishing still
+    # process the union of everything in out/, so a scoped run adds to (rather
+    # than replaces) the Release. When a single platform whose in-container
+    # build honours the arch scope is selected, its configured archs restrict
+    # the arch matrix; otherwise every arch that platform's container supports
+    # is built (a single env cannot express per-platform archs, and the other
+    # in-container scripts do not yet read GODOT_BUILD_ARCHS).
+    platforms = _parse_platforms(args.platform)
+    if not platforms:
+        logger.error("No platforms specified. Use --platform linux,windows,... or all.")
+        return 1
+    build_archs = (
+        get_platform_archs(config, platforms[0])
+        if len(platforms) == 1 and platforms[0] in _ARCH_SCOPED_PLATFORMS
+        else None
+    )
+
     # Build type from the configured mono matrix.
     mono = build_cfg["mono"]
     if "on" in mono and "off" in mono:
@@ -848,10 +871,14 @@ def cmd_release(args: argparse.Namespace) -> int:
     else:
         build_type = "classical"
 
+    stages = ResultTable("Release summary", ["Stage", "Status"], status_column=1)
+
     # --- Build (host orchestrator: deps + tarball + per-platform docker passes) ---
     if args.do_build:
-        logger.info(
-            "--- Building matrix (build_type=%s, -j%d) ---", build_type, num_cores
+        section(
+            "Build",
+            f"build_type={build_type}  platforms={','.join(platforms)}  "
+            f"jobs={num_cores}",
         )
         rc = dispatch_build(
             build_dir=_BUILD_AND_TEMPLATES_DIR,
@@ -862,26 +889,32 @@ def cmd_release(args: argparse.Namespace) -> int:
             registry=config["registry"],
             username=config["username"],
             container_version=godot_version,
+            platforms=platforms,
+            build_archs=build_archs,
             dry_run=args.dry_run,
         )
         if rc != 0:
             logger.error("Build step exited with code %d.", rc)
+            stages.add("Build", "failed")
+            stages.print()
             return 4
+        stages.add("Build", "dry-run" if args.dry_run else "ok")
     else:
         logger.info("Skipping build step (--no-build).")
+        stages.add("Build", "skipped")
 
     # Single source of truth: upstream/godot/version.py drives both the engine
     # binary's reported version AND every release artifact name. This is what
     # Godot writes into `version.txt` inside the .tpz and looks up at install
     # time, so any divergence between the binary and the templates breaks the
     # template lookup. The release tag, the published filenames, the release
-    # staging directory — all use `<version>.<status>` (e.g. `4.7.beta`).
+    # staging directory — all use `<version>.<status>` (e.g. `4.8.beta`).
     _, engine_status = _read_version(_BUILD_AND_TEMPLATES_DIR.parent / "upstream" / "godot")
     binaries_version = f"{godot_version}.{engine_status}"
 
     # --- Package (scripts.packager: editor zips + .tpz + SHA512-SUMS.txt) ---
     if args.do_package:
-        logger.info("--- Packaging artifacts ---")
+        section("Package")
         rc = package_release(
             build_dir=_BUILD_AND_TEMPLATES_DIR,
             godot_version=godot_version,
@@ -890,12 +923,17 @@ def cmd_release(args: argparse.Namespace) -> int:
         )
         if rc != 0:
             logger.error("Package step exited with code %d.", rc)
+            stages.add("Package", "failed")
+            stages.print()
             return 4
+        stages.add("Package", "dry-run" if args.dry_run else "ok")
     else:
         logger.info("Skipping package step (--no-package).")
+        stages.add("Package", "skipped")
 
     # --- Publish (gh release) ---
     if do_upload:
+        section("Publish", f"tag={tag}  repo={repo}")
         release_dir = _BUILD_AND_TEMPLATES_DIR / "releases" / binaries_version
         assets = collect_release_assets(release_dir)
         if args.dry_run and not assets:
@@ -920,11 +958,15 @@ def cmd_release(args: argparse.Namespace) -> int:
             )
         except PublishError as exc:
             logger.error("Release publish failed: %s", exc)
+            stages.add("Publish", "failed")
+            stages.print()
             return 5
 
         logger.info("Release '%s' published to %s.", tag, repo)
+        stages.add("Publish", "dry-run" if args.dry_run else "ok")
     else:
         logger.info("Skipping release upload step (--no-upload / auto_upload=false).")
+        stages.add("Publish", "skipped")
 
     # --- Publish (GitHub Packages NuGet) ---
     # The Mono build emits the managed packages (GodotSharp, GodotSharpEditor,
@@ -936,6 +978,7 @@ def cmd_release(args: argparse.Namespace) -> int:
         args.do_nuget if args.do_nuget is not None else release_cfg["publish_nuget"]
     )
     if do_nuget:
+        section("NuGet publish")
         nuget_source = release_cfg["nuget_source"] or default_nuget_source(
             config["username"]
         )
@@ -965,11 +1008,15 @@ def cmd_release(args: argparse.Namespace) -> int:
             )
         except PublishError as exc:
             logger.error("NuGet publish failed: %s", exc)
+            stages.add("NuGet publish", "failed")
+            stages.print()
             return 5
+        stages.add("NuGet publish", "dry-run" if args.dry_run else "ok")
     else:
         logger.info(
             "Skipping NuGet publish step (--no-nuget / publish_nuget=false)."
         )
+        stages.add("NuGet publish", "skipped")
 
     # Cosmetic cleanup, run LAST: hand the Docker-produced (root-owned) build
     # outputs back to the invoking user. Deliberately after packaging +
@@ -977,6 +1024,7 @@ def cmd_release(args: argparse.Namespace) -> int:
     # not cost the build/publish work that already succeeded. It never raises.
     _chown_outputs(_BUILD_AND_TEMPLATES_DIR, dry_run=args.dry_run)
 
+    stages.print()
     return 0
 
 
