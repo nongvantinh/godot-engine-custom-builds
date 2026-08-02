@@ -205,11 +205,10 @@ def _copy_editor_outputs(godot_dir: Path, dest: Path, *, store_release: str) -> 
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from scripts.console import configure_logging
+
     del argv
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    configure_logging(verbose=False)
 
     num_cores = common.env_num_cores()
     classical = common.env_flag("CLASSICAL")

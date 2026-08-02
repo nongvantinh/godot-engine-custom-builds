@@ -243,7 +243,9 @@ def run_build(
             # Mono glue is generated with the Linux image. When the run is
             # scoped to a non-Linux platform the Linux image was not pulled
             # above, so make sure it is available before the glue pass.
-            if not skip_download_containers and (scope is not None and "linux" not in scope):
+            if not skip_download_containers and (
+                scope is not None and "linux" not in scope
+            ):
                 _ensure_image_available(images["linux"], "linux", dry_run=dry_run)
             _run_build_mono_glue(
                 basedir=basedir,
@@ -516,7 +518,9 @@ def _download_moltenvk(deps_root: Path, *, dry_run: bool) -> None:
             shutil.move(str(xc_src), str(sentinel))
 
 
-def _download_angle(deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool) -> None:
+def _download_angle(
+    deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool
+) -> None:
     # Version is the engine's single source of truth. The old chromium/6601.2
     # arm64-llvm bundle embedded libc++ symbols that clashed with llvm-mingw at
     # link time (the historical reason Windows arm64 was best-effort); reading
@@ -555,7 +559,9 @@ def _download_angle(deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool)
     _write_dep_marker(target, version)
 
 
-def _download_winrt(deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool) -> None:
+def _download_winrt(
+    deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool
+) -> None:
     """Fetch the WinRT (OneCore TTS) MinGW headers the Windows build needs.
 
     Version is the engine's single source of truth (``install_winrt.py`` —
@@ -587,7 +593,9 @@ def _download_winrt(deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool)
     _write_dep_marker(target, version)
 
 
-def _download_swappy(deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool) -> None:
+def _download_swappy(
+    deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool
+) -> None:
     tag = _engine_install_version(
         upstream_godot_dir, "install_swappy_android.py", "swappy_tag"
     )
@@ -598,7 +606,11 @@ def _download_swappy(deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool
     target = deps_root / "swappy"
     # godot-swappy.7z extracts to a `godot-swappy/` subdir.
     sentinel = target / "godot-swappy"
-    if sentinel.is_dir() and any(sentinel.iterdir()) and _dep_marker_current(target, tag):
+    if (
+        sentinel.is_dir()
+        and any(sentinel.iterdir())
+        and _dep_marker_current(target, tag)
+    ):
         logger.info("Swappy %s already extracted under %s; skipping.", tag, target)
         return
     if target.is_dir():
@@ -772,8 +784,7 @@ def _read_version(upstream_godot_dir: Path) -> tuple[str, str]:
         raise _HostOrchestratorError(
             f"Failed to load version.py from {upstream_godot_dir}."
         )
-    code = textwrap.dedent(
-        """
+    code = textwrap.dedent("""
         import sys
         sys.path.insert(0, sys.argv[1])
         import version as v
@@ -786,8 +797,7 @@ def _read_version(upstream_godot_dir: Path) -> tuple[str, str]:
         else:
             print(f"{major}.{minor}")
         print(status)
-        """
-    )
+        """)
     try:
         result = subprocess.run(
             [sys.executable, "-c", code, str(upstream_godot_dir)],

@@ -909,7 +909,9 @@ def cmd_release(args: argparse.Namespace) -> int:
     # time, so any divergence between the binary and the templates breaks the
     # template lookup. The release tag, the published filenames, the release
     # staging directory — all use `<version>.<status>` (e.g. `4.8.beta`).
-    _, engine_status = _read_version(_BUILD_AND_TEMPLATES_DIR.parent / "upstream" / "godot")
+    _, engine_status = _read_version(
+        _BUILD_AND_TEMPLATES_DIR.parent / "upstream" / "godot"
+    )
     binaries_version = f"{godot_version}.{engine_status}"
 
     # --- Package (scripts.packager: editor zips + .tpz + SHA512-SUMS.txt) ---
@@ -1013,9 +1015,7 @@ def cmd_release(args: argparse.Namespace) -> int:
             return 5
         stages.add("NuGet publish", "dry-run" if args.dry_run else "ok")
     else:
-        logger.info(
-            "Skipping NuGet publish step (--no-nuget / publish_nuget=false)."
-        )
+        logger.info("Skipping NuGet publish step (--no-nuget / publish_nuget=false).")
         stages.add("NuGet publish", "skipped")
 
     # Cosmetic cleanup, run LAST: hand the Docker-produced (root-owned) build

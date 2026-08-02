@@ -1,4 +1,5 @@
 """Tests for scripts/patcher.py — patch application helpers."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -80,9 +81,7 @@ class TestApplyPatchesCallsGitApply:
             apply_patches(str(patches_dir), source_dir)
 
         assert mock_run.call_count == 3
-        applied_names = [
-            Path(call[0][0][-1]).name for call in mock_run.call_args_list
-        ]
+        applied_names = [Path(call[0][0][-1]).name for call in mock_run.call_args_list]
         assert applied_names == [
             "001-first.patch",
             "002-second.patch",

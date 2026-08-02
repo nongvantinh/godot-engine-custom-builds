@@ -54,25 +54,37 @@ def configure_logging(verbose: bool) -> None:
     long SCons/docker/gh command lines at whatever width it falls back to,
     breaking `grep`/substring matching on those logs. A generous fixed width
     keeps piped output effectively unwrapped, matching plain `logging`.
+
+    Existing handlers (e.g. pytest ``caplog``) are preserved; only prior
+    ``RichHandler`` instances are replaced.
     """
     level = logging.DEBUG if verbose else logging.INFO
-    log_console = console if console.is_terminal else Console(
-        soft_wrap=True, width=4096
+    log_console = (
+        console if console.is_terminal else Console(soft_wrap=True, width=4096)
     )
-    logging.basicConfig(
-        level=level,
-        format="%(message)s",
-        datefmt="[%X]",
-        handlers=[
-            RichHandler(
-                console=log_console,
-                show_path=False,
-                markup=False,
-                rich_tracebacks=True,
-            )
-        ],
-        force=True,
+    rich_handler = RichHandler(
+        console=log_console,
+        show_path=False,
+        markup=False,
+        rich_tracebacks=True,
     )
+    rich_handler.setLevel(level)
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    for handler in list(root.handlers):
+        if isinstance(handler, RichHandler):
+            root.removeHandler(handler)
+    if not any(isinstance(h, RichHandler) for h in root.handlers):
+        root.addHandler(rich_handler)
+    elif not root.handlers:
+        logging.basicConfig(
+            level=level,
+            format="%(message)s",
+            datefmt="[%X]",
+            handlers=[rich_handler],
+            force=True,
+        )
 
 
 def section(title: str, subtitle: str = "", *, style: str = "cyan") -> None:

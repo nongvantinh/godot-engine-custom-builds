@@ -388,10 +388,14 @@ class TestReleaseChownRunsLast:
             ),
             mock.patch.object(cli, "nuget_token_from_env", return_value="tok"),
             mock.patch.object(
-                cli, "delete_nupkg_versions", side_effect=lambda **k: calls.append("nuget-del")
+                cli,
+                "delete_nupkg_versions",
+                side_effect=lambda **k: calls.append("nuget-del"),
             ),
             mock.patch.object(
-                cli, "publish_nupkgs", side_effect=lambda **k: calls.append("nuget-push")
+                cli,
+                "publish_nupkgs",
+                side_effect=lambda **k: calls.append("nuget-push"),
             ),
             mock.patch.object(
                 cli, "_chown_outputs", side_effect=lambda *a, **k: calls.append("chown")
@@ -430,9 +434,7 @@ class TestReleaseAppleAlwaysBuilds:
         apple_gate_kwargs = [k for k in captured["kwargs"] if "apple" in k.lower()]
         assert apple_gate_kwargs == []
 
-    def test_release_scopes_build_to_requested_platform_and_archs(
-        self, cli, tmp_path
-    ):
+    def test_release_scopes_build_to_requested_platform_and_archs(self, cli, tmp_path):
         # A single-platform scope threads the platform filter AND that
         # platform's configured archs into dispatch_build (arch scoping is a
         # Linux capability today).
@@ -454,9 +456,7 @@ class TestReleaseAppleAlwaysBuilds:
             captured.update(kwargs)
             return 0
 
-        args = _release_args(
-            str(cfg), platform="linux", do_build=True, do_upload=False
-        )
+        args = _release_args(str(cfg), platform="linux", do_build=True, do_upload=False)
         with mock.patch.object(cli, "dispatch_build", side_effect=fake_build):
             rc = cli.cmd_release(args)
 

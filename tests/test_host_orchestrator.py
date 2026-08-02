@@ -201,9 +201,7 @@ class TestPullImages:
             "scripts.host_orchestrator.subprocess.run",
             side_effect=self._fake_run(present=False),
         ) as run:
-            host_orchestrator._pull_images(
-                images, platforms={"linux"}, dry_run=False
-            )
+            host_orchestrator._pull_images(images, platforms={"linux"}, dry_run=False)
 
         pulls = [c for c in run.call_args_list if c.args[0][:2] == ["docker", "pull"]]
         assert len(pulls) == 1
@@ -569,9 +567,7 @@ class TestDownloadSwappy:
 
         dl.assert_called_once()
         extract.assert_called_once()
-        assert (
-            (target / ".dep-version").read_text().strip() == "from-source-2025-01-31"
-        )
+        assert (target / ".dep-version").read_text().strip() == "from-source-2025-01-31"
         # The pinned tag must appear in the download URL.
         assert "from-source-2025-01-31" in dl.call_args.args[0]
 

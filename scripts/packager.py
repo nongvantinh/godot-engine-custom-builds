@@ -192,8 +192,7 @@ def _print_release_artifacts_table(release_dir: Path) -> None:
     if not files:
         return
     rows = [
-        (str(p.relative_to(release_dir)), _human_size(p.stat().st_size))
-        for p in files
+        (str(p.relative_to(release_dir)), _human_size(p.stat().st_size)) for p in files
     ]
     summary_table(f"Packaged artifacts — {release_dir.name}", ["File", "Size"], rows)
 

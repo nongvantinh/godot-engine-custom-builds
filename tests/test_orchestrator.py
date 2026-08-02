@@ -648,18 +648,14 @@ class TestBuildNugetVersionCommands:
             username="nongvantinh", package_name="Godot.NET.Sdk"
         )
         assert cmd[:3] == ["gh", "api", "--paginate"]
-        assert cmd[-1] == (
-            "/users/nongvantinh/packages/nuget/Godot.NET.Sdk/versions"
-        )
+        assert cmd[-1] == ("/users/nongvantinh/packages/nuget/Godot.NET.Sdk/versions")
 
     def test_delete_version_targets_version_id(self):
         cmd = build_nuget_delete_version_command(
             username="nongvantinh", package_name="GodotSharp", version_id=42
         )
         assert cmd[:4] == ["gh", "api", "-X", "DELETE"]
-        assert cmd[-1] == (
-            "/users/nongvantinh/packages/nuget/GodotSharp/versions/42"
-        )
+        assert cmd[-1] == ("/users/nongvantinh/packages/nuget/GodotSharp/versions/42")
 
 
 class TestDeleteNupkgVersions:
@@ -705,7 +701,12 @@ class TestDeleteNupkgVersions:
             tmp_path / "GodotSharp.4.8.0-beta.nupkg", "GodotSharp", "4.8.0-beta"
         )
         listing = subprocess.CompletedProcess(
-            [], 0, stdout=json.dumps([{"id": 7, "name": "4.8.0-beta"}, {"id": 1, "name": "4.4.1-stable-.1"}]), stderr=""
+            [],
+            0,
+            stdout=json.dumps(
+                [{"id": 7, "name": "4.8.0-beta"}, {"id": 1, "name": "4.4.1-stable-.1"}]
+            ),
+            stderr="",
         )
         deletion = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         with (

@@ -19,7 +19,6 @@ import pytest
 
 from scripts import packager
 
-
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -799,9 +798,7 @@ class TestWindowsLlvmInfix:
         release_dir = basedir / "releases" / _BINARIES_VERSION
         # The published names stay toolchain-agnostic (winarm64, no ".llvm").
         assert (release_dir / f"{_GODOT_BASENAME}_winarm64.exe.zip").is_file()
-        assert (
-            release_dir / "mono" / f"{_GODOT_BASENAME}_mono_winarm64.zip"
-        ).is_file()
+        assert (release_dir / "mono" / f"{_GODOT_BASENAME}_mono_winarm64.zip").is_file()
 
     def test_arm64_templates_staged_without_llvm_in_dest(self, basedir, upstream_godot):
         # arm64 template exes must land in the tpz staging under the
@@ -817,7 +814,12 @@ class TestWindowsLlvmInfix:
             upstream_godot_dir=upstream_godot,
         )
         assert rc == 0
-        tpz = basedir / "releases" / _BINARIES_VERSION / f"{_GODOT_BASENAME}_export_templates.tpz"
+        tpz = (
+            basedir
+            / "releases"
+            / _BINARIES_VERSION
+            / f"{_GODOT_BASENAME}_export_templates.tpz"
+        )
         assert tpz.is_file()
         with zipfile.ZipFile(tpz) as zf:
             names = set(zf.namelist())

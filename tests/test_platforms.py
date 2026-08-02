@@ -72,9 +72,7 @@ class TestIterPlatformsMounts:
     def test_exact_yield_sequence(self):
         basedir = Path("/bd")
         images = host_orchestrator._resolve_image_names("ghcr.io", "u", "4.8")
-        got = list(
-            host_orchestrator._iter_platforms(basedir=basedir, images=images)
-        )
+        got = list(host_orchestrator._iter_platforms(basedir=basedir, images=images))
 
         def mounts(name, *deps):
             m = ["-v", f"/bd/out/{name}:/root/out"]

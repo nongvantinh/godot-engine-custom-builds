@@ -50,11 +50,10 @@ _GODOT_OPTIONS: tuple[str, ...] = (
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point invoked by ``python3 -m scripts.in_container.build_mono_glue``."""
+    from scripts.console import configure_logging
+
     del argv  # No CLI args; env-driven.
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    configure_logging(verbose=False)
 
     num_cores = common.env_num_cores()
     mono = common.env_flag("MONO")

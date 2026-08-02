@@ -29,7 +29,6 @@ from scripts.in_container import (
     build_windows,
 )
 
-
 # ---------------------------------------------------------------------------
 # Shared fixtures + helpers
 # ---------------------------------------------------------------------------
@@ -496,7 +495,8 @@ class TestBuildAndroid:
 
         assert rc == 0
         assert any(
-            "using debug build instead" in r.message.lower() for r in caplog.records
+            "using debug build instead" in r.getMessage().lower()
+            for r in caplog.records
         )
         # Every editor scons call carries store_release=no.
         editor_calls = [args for args in captured_args if "target=editor" in args]
@@ -928,7 +928,7 @@ class TestBuildWeb:
                 "scripts.in_container.build_web._source_emsdk",
                 side_effect=lambda e: e,
             ),
-            caplog.at_level("INFO", logger="scripts.in_container.build_web"),
+            caplog.at_level("INFO"),
         ):
             rc = build_web.main([])
 

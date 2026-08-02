@@ -1,4 +1,5 @@
 """Tests for scripts/docker_helper.py — Docker interaction helpers."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -6,7 +7,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from scripts.config import ConfigError
-from scripts.docker_helper import DockerUnavailableError, ensure_docker, login, run_build
+from scripts.docker_helper import (
+    DockerUnavailableError,
+    ensure_docker,
+    login,
+    run_build,
+)
 
 # ---------------------------------------------------------------------------
 # ensure_docker
@@ -23,8 +29,12 @@ class TestEnsureDocker:
         mock_result = MagicMock()
         mock_result.returncode = 1
 
-        with patch("scripts.docker_helper.shutil.which", return_value="/usr/bin/docker"):
-            with patch("scripts.docker_helper.subprocess.run", return_value=mock_result):
+        with patch(
+            "scripts.docker_helper.shutil.which", return_value="/usr/bin/docker"
+        ):
+            with patch(
+                "scripts.docker_helper.subprocess.run", return_value=mock_result
+            ):
                 with pytest.raises(DockerUnavailableError, match="daemon"):
                     ensure_docker()
 
@@ -32,8 +42,12 @@ class TestEnsureDocker:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("scripts.docker_helper.shutil.which", return_value="/usr/bin/docker"):
-            with patch("scripts.docker_helper.subprocess.run", return_value=mock_result):
+        with patch(
+            "scripts.docker_helper.shutil.which", return_value="/usr/bin/docker"
+        ):
+            with patch(
+                "scripts.docker_helper.subprocess.run", return_value=mock_result
+            ):
                 ensure_docker()  # Must not raise
 
 
@@ -135,7 +149,9 @@ class TestRunBuild:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("scripts.docker_helper.subprocess.run", return_value=mock_result) as mock_run:
+        with patch(
+            "scripts.docker_helper.subprocess.run", return_value=mock_result
+        ) as mock_run:
             run_build(
                 image="ghcr.io/test/linux:4.3",
                 scons_flags="platform=linuxbsd",
@@ -152,7 +168,9 @@ class TestRunBuild:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("scripts.docker_helper.subprocess.run", return_value=mock_result) as mock_run:
+        with patch(
+            "scripts.docker_helper.subprocess.run", return_value=mock_result
+        ) as mock_run:
             run_build(
                 image="ghcr.io/test/linux:4.3",
                 scons_flags="platform=linuxbsd target=editor",
@@ -170,7 +188,9 @@ class TestRunBuild:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("scripts.docker_helper.subprocess.run", return_value=mock_result) as mock_run:
+        with patch(
+            "scripts.docker_helper.subprocess.run", return_value=mock_result
+        ) as mock_run:
             run_build(
                 image="ghcr.io/test/linux:4.3",
                 scons_flags="platform=linuxbsd target=editor",
@@ -190,7 +210,9 @@ class TestRunBuild:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("scripts.docker_helper.subprocess.run", return_value=mock_result) as mock_run:
+        with patch(
+            "scripts.docker_helper.subprocess.run", return_value=mock_result
+        ) as mock_run:
             run_build(
                 image="ghcr.io/test/linux:4.3",
                 scons_flags="platform=linuxbsd",

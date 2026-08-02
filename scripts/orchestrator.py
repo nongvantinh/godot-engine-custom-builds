@@ -748,9 +748,7 @@ def publish_nupkgs(
 
     logger.info("Publishing %d NuGet package(s) to %s", len(nupkgs), source)
     for nupkg in nupkgs:
-        cmd = build_nuget_push_command(
-            nupkg=str(nupkg), source=source, api_key=api_key
-        )
+        cmd = build_nuget_push_command(nupkg=str(nupkg), source=source, api_key=api_key)
         if dry_run:
             # Never log the api-key. Print a redacted command instead.
             redacted = [a if a != api_key else "***" for a in cmd]

@@ -343,9 +343,7 @@ def get_release_config(config: dict) -> dict:
         "auto_upload": release.get("auto_upload", DEFAULT_RELEASE_AUTO_UPLOAD),
         "draft": release.get("draft", DEFAULT_RELEASE_DRAFT),
         "prerelease": release.get("prerelease", DEFAULT_RELEASE_PRERELEASE),
-        "publish_nuget": release.get(
-            "publish_nuget", DEFAULT_RELEASE_PUBLISH_NUGET
-        ),
+        "publish_nuget": release.get("publish_nuget", DEFAULT_RELEASE_PUBLISH_NUGET),
         "nuget_overwrite": release.get(
             "nuget_overwrite", DEFAULT_RELEASE_NUGET_OVERWRITE
         ),
