@@ -10,8 +10,8 @@ rather than a hunt across modules.
 
 The tuple order is the canonical release build order: Linux first (its image
 generates the Mono glue and it is the fastest desktop editor to validate),
-then the remaining platforms. Each platform build is otherwise independent, so
-the order only affects when a given platform's artifacts appear.
+then Android, Windows, and the remaining platforms (macOS, iOS, Web). Within
+each platform container pass, Mono artifacts are built before classical.
 """
 
 from __future__ import annotations

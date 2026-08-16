@@ -55,7 +55,41 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
+from scripts import build_logs
+
 logger = logging.getLogger(__name__)
+
+
+def _run_subprocess_with_log(
+    cmd: list[str],
+    *,
+    log_path: Path,
+    header: str,
+    env: Mapping[str, str] | None = None,
+    cwd: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run *cmd*, mirror stdout/stderr to *log_path* and the console."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w", encoding="utf-8") as log_f:
+        log_f.write(header)
+        log_f.flush()
+        process = subprocess.Popen(
+            cmd,
+            env=dict(env) if env is not None else None,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        assert process.stdout is not None
+        for line in process.stdout:
+            log_f.write(line)
+            log_f.flush()
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        returncode = process.wait()
+    return subprocess.CompletedProcess(cmd, returncode)
 
 
 # ---------------------------------------------------------------------------
@@ -116,12 +150,23 @@ def run_scons(
         Scons exit code (always 0 when ``check=True`` and we return).
     """
     cmd: list[str] = ["scons", f"-j{num_cores}", *SCONS_COMMON_FLAGS, *args]
-    logger.info("Running: %s", " ".join(cmd))
-    result = subprocess.run(
-        cmd,
-        env=dict(env) if env is not None else None,
-        cwd=str(cwd) if cwd is not None else None,
-    )
+    log_path = build_logs.scons_log_path(args)
+    if log_path is not None:
+        logger.info("Running: %s (log: %s)", " ".join(cmd), log_path)
+        result = _run_subprocess_with_log(
+            cmd,
+            log_path=log_path,
+            header=f"# {' '.join(cmd)}\n\n",
+            env=dict(env) if env is not None else None,
+            cwd=str(cwd) if cwd is not None else None,
+        )
+    else:
+        logger.info("Running: %s", " ".join(cmd))
+        result = subprocess.run(
+            cmd,
+            env=dict(env) if env is not None else None,
+            cwd=str(cwd) if cwd is not None else None,
+        )
     if check and result.returncode != 0:
         raise InContainerBuildError(
             f"scons exited with code {result.returncode}: {' '.join(cmd)}"
@@ -530,26 +575,74 @@ def build_mono_assemblies(
         )
 
 
+_GRADLE_DEFAULT_ATTEMPTS = 4
+_GRADLE_BACKOFF_S = 20
+
+
 def gradle_wrapper(
     godot_dir: Path,
     task: str,
+    *,
+    attempts: int = _GRADLE_DEFAULT_ATTEMPTS,
+    sleep_fn=time.sleep,
 ) -> None:
     """Invoke ``platform/android/java/gradlew <task>``.
 
     Used by the Android build for ``generateGodotEditor``,
     ``generateGodotTemplates``, ``generateGodotMonoTemplates``.
+
+    Retries transient network/DNS failures when Gradle downloads Maven deps.
     """
     gradle_root = godot_dir / "platform" / "android" / "java"
     gradlew = gradle_root / "gradlew"
     if not gradlew.is_file():
         raise InContainerBuildError(f"gradlew missing at {gradlew}.")
     cmd: list[str] = [str(gradlew), task]
-    logger.info("Running: %s (cwd=%s)", " ".join(cmd), gradle_root)
-    result = subprocess.run(cmd, cwd=str(gradle_root))
-    if result.returncode != 0:
-        raise InContainerBuildError(
-            f"gradlew {task} failed with exit {result.returncode}."
-        )
+    log_path = build_logs.gradle_log_path(task)
+    last_rc = 1
+    for attempt in range(1, attempts + 1):
+        if log_path is not None:
+            attempt_path = log_path if attempts == 1 else log_path.with_name(
+                f"{log_path.stem}.attempt{attempt}{log_path.suffix}"
+            )
+            attempt_path.parent.mkdir(parents=True, exist_ok=True)
+            logger.info(
+                "Running: %s (cwd=%s, attempt %d/%d, log: %s)",
+                " ".join(cmd),
+                gradle_root,
+                attempt,
+                attempts,
+                attempt_path,
+            )
+            result = _run_subprocess_with_log(
+                cmd,
+                log_path=attempt_path,
+                header=f"# {' '.join(cmd)} (attempt {attempt}/{attempts})\n\n",
+                cwd=str(gradle_root),
+            )
+        else:
+            logger.info(
+                "Running: %s (cwd=%s, attempt %d/%d)",
+                " ".join(cmd),
+                gradle_root,
+                attempt,
+                attempts,
+            )
+            result = subprocess.run(cmd, cwd=str(gradle_root))
+        last_rc = result.returncode
+        if last_rc == 0:
+            return
+        if attempt < attempts:
+            logger.warning(
+                "gradlew %s failed with exit %d; retrying after %ds...",
+                task,
+                last_rc,
+                _GRADLE_BACKOFF_S,
+            )
+            sleep_fn(_GRADLE_BACKOFF_S)
+    raise InContainerBuildError(
+        f"gradlew {task} failed with exit {last_rc} after {attempts} attempt(s)."
+    )
 
 
 # ---------------------------------------------------------------------------

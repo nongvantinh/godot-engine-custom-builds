@@ -242,6 +242,37 @@ than copy it, so rebasing onto a future Godot release stays cheap.
 | `upstream/godot` | The engine source (a fork submodule) — also the authority for dependency + engine versions. |
 | `upstream/{godot-build-scripts,build-containers}` | Upstream reference submodules for cherry-picking; **not** on the build path. |
 
+### Build workspace (`build-godot-and-templates/`)
+
+All build artifacts, packaged releases, and logs live under this directory — not
+the repo root.
+
+| Path | Role |
+|---|---|
+| `out/` | Raw SCons output per platform/arch (source of truth for packaging). |
+| `releases/` | Packaged editor zips, `.tpz` templates, and `SHA512-SUMS`. |
+| `tmp/staging/` | Ephemeral packaging workspace (macOS `.app`, iOS xcode, intermediate zips). |
+| `output/` | Local `build` sub-command SCons output (when not using release containers). |
+| `logs/<run-id>/` | One directory per release/build run; `logs/latest` symlinks to the most recent. |
+
+**Log layout for a release run** (`logs/latest/`):
+
+```
+release.log                         top-level orchestrator transcript
+mono-glue/container.log             mono glue container stdout/stderr
+mono-glue/scons.editor.log          mono glue SCons pass
+<platform>/container.log            per-platform container stdout/stderr
+<platform>/<flavor>/<arch>.<target>.log   one file per SCons invocation
+<platform>/<flavor>/gradle.<task>.log     Android Gradle steps
+```
+
+Example: `logs/latest/linux/mono/x86_64.editor.log` holds the Mono Linux
+x86_64 editor SCons pass only — not the whole platform in one file.
+
+Legacy repo-root `release-*.log` files and the root `output/` folder are no
+longer written by `build-godot.py`. Safe to delete after confirming you no
+longer need them.
+
 ### Build → package → publish flow
 
 ```
@@ -371,6 +402,7 @@ automatically included and built before the other types.
 #### Example invocations
 
 ```bash
+
 # Build only the Linux container image
 uv run python build-godot.py containers --type linux --version 4.8
 
@@ -401,6 +433,8 @@ uv run python build-godot.py containers --type all --version 4.8 --dry-run
 ### Example invocations
 
 ```bash
+uv run python build-godot.py release --platform all --build --package --upload --nuget --nuget-overwrite --force 
+
 # Linux editor build (Docker, or local scons if Docker is unavailable)
 uv run python build-godot.py build --platform linux --kind editor
 

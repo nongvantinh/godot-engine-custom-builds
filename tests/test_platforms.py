@@ -20,11 +20,9 @@ class TestRegistry:
             {"linux", "windows", "android", "web", "macos", "ios"}
         )
 
-    def test_release_order_starts_with_linux(self):
-        # Linux first: its image generates the Mono glue and it is the fastest
-        # desktop editor to validate.
-        assert platforms.release_order()[0] == "linux"
-        assert set(platforms.release_order()) == set(platforms.names())
+    def test_release_order_linux_android_windows_then_apple_and_web(self):
+        order = platforms.release_order()
+        assert order == ["linux", "android", "windows", "macos", "ios", "web"]
 
     def test_only_linux_skips_docker(self):
         assert platforms.docker_required_names() == platforms.names() - {"linux"}

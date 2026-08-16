@@ -244,8 +244,47 @@ def main(argv: Sequence[str] | None = None) -> int:
             "GODOT_ANDROID_SIGN_PASSWORD", ""
         )
 
+        if mono:
+            logger.info("Starting Mono build for Android...")
+            env["GODOT_BUILD_FLAVOR"] = "mono"
+            common.copy_mono_glue(mono_glue_src, godot_dir, include_editor=False)
+
+            for arch in _ARCHS:
+                common.run_scons(
+                    "platform=android",
+                    f"arch={arch}",
+                    *_OPTIONS,
+                    *_OPTIONS_MONO,
+                    "target=template_debug",
+                    num_cores=num_cores,
+                    env=env,
+                    cwd=godot_dir,
+                )
+                common.run_scons(
+                    "platform=android",
+                    f"arch={arch}",
+                    *_OPTIONS,
+                    *_OPTIONS_MONO,
+                    "target=template_release",
+                    *_release_symbol_flags(arch),
+                    num_cores=num_cores,
+                    env=env,
+                    cwd=godot_dir,
+                )
+
+            common.gradle_wrapper(godot_dir, "generateGodotMonoTemplates")
+            _copy_native_symbols(godot_dir, out_root / "templates-mono")
+            _copy_template_outputs(godot_dir, out_root / "templates-mono", mono=True)
+
+        if mono and classical:
+            logger.info("Restarting from clean tarball for classical pass...")
+            shutil.rmtree(godot_dir)
+            godot_dir = common.setup_godot_source()
+            common.apply_swappy(swappy_src, godot_dir)
+
         if classical:
             logger.info("Starting classical build for Android...")
+            env["GODOT_BUILD_FLAVOR"] = "classical"
             # Editor: build every arch with native debug symbols (the last arch,
             # x86_64, additionally emits the separate-symbols zip that covers all
             # editor archs — same gating as the templates pass).
@@ -316,37 +355,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
 
             _copy_template_outputs(godot_dir, out_root / "templates", mono=False)
-
-        if mono:
-            logger.info("Starting Mono build for Android...")
-            common.copy_mono_glue(mono_glue_src, godot_dir, include_editor=False)
-
-            for arch in _ARCHS:
-                common.run_scons(
-                    "platform=android",
-                    f"arch={arch}",
-                    *_OPTIONS,
-                    *_OPTIONS_MONO,
-                    "target=template_debug",
-                    num_cores=num_cores,
-                    env=env,
-                    cwd=godot_dir,
-                )
-                common.run_scons(
-                    "platform=android",
-                    f"arch={arch}",
-                    *_OPTIONS,
-                    *_OPTIONS_MONO,
-                    "target=template_release",
-                    *_release_symbol_flags(arch),
-                    num_cores=num_cores,
-                    env=env,
-                    cwd=godot_dir,
-                )
-
-            common.gradle_wrapper(godot_dir, "generateGodotMonoTemplates")
-            _copy_native_symbols(godot_dir, out_root / "templates-mono")
-            _copy_template_outputs(godot_dir, out_root / "templates-mono", mono=True)
 
         logger.info("Android build successful")
         return 0

@@ -89,6 +89,27 @@ def _real_version_read(cmd):
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Mirrors the pins the host orchestrator parses out of the engine's
+# ``misc/scripts/install_swappy_android.py`` (tag, archive name, ABI list).
+_SWAPPY_INSTALL_SCRIPT = """\
+swappy_tag = "{tag}"
+swappy_filename = "godot-swappy.zip"
+swappy_folder = "thirdparty/swappy-frame-pacing"
+swappy_archs = [
+    "arm64-v8a",
+    "armeabi-v7a",
+    "x86",
+    "x86_64",
+]
+"""
+_SWAPPY_ARCHS = ("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+
+
+def _stage_swappy_libs(target: Path, archs=_SWAPPY_ARCHS) -> None:
+    for arch in archs:
+        (target / arch).mkdir(parents=True, exist_ok=True)
+        (target / arch / "libswappy_static.a").write_text("lib")
+
 
 def _make_version_py(
     upstream: Path,
@@ -123,7 +144,7 @@ def _make_version_py(
         'winrt_version = "72"\n', encoding="utf-8"
     )
     (scripts / "install_swappy_android.py").write_text(
-        'swappy_tag = "from-source-2025-01-31"\n', encoding="utf-8"
+        _SWAPPY_INSTALL_SCRIPT.format(tag="from-source-2025-01-31"), encoding="utf-8"
     )
 
 
@@ -523,17 +544,16 @@ class TestDownloadSwappy:
         scripts = up / "misc" / "scripts"
         scripts.mkdir(parents=True, exist_ok=True)
         (scripts / "install_swappy_android.py").write_text(
-            f'swappy_tag = "{tag}"\n', encoding="utf-8"
+            _SWAPPY_INSTALL_SCRIPT.format(tag=tag), encoding="utf-8"
         )
         return up
 
-    def test_skips_when_extracted_and_marker_current(self, tmp_path):
-        # Skip only when the extracted dir exists AND the version marker matches
-        # the engine-pinned tag — a pure skip (no download, no extract).
+    def test_skips_when_every_arch_lib_present_and_marker_current(self, tmp_path):
+        # Skip only when every engine-listed ABI has its static lib AND the
+        # version marker matches the pinned tag — a pure skip (no download).
         deps = tmp_path / "deps"
         target = deps / "swappy"
-        (target / "godot-swappy").mkdir(parents=True)
-        (target / "godot-swappy" / "libswappy.a").write_text("lib")
+        _stage_swappy_libs(target)
         (target / ".dep-version").write_text("from-source-2025-01-31")
         up = self._upstream_with_swappy(tmp_path)
 
@@ -546,21 +566,39 @@ class TestDownloadSwappy:
         dl.assert_not_called()
         extract.assert_not_called()
 
+    def test_redownloads_when_an_arch_lib_is_missing(self, tmp_path):
+        # A marked dir that is missing even one ABI's lib is not a usable
+        # Swappy install; detect_swappy() would disable frame pacing.
+        deps = tmp_path / "deps"
+        target = deps / "swappy"
+        _stage_swappy_libs(target, archs=("arm64-v8a",))
+        (target / ".dep-version").write_text("from-source-2025-01-31")
+        up = self._upstream_with_swappy(tmp_path)
+
+        with (
+            mock.patch("scripts.host_orchestrator._download_with_retry") as dl,
+            mock.patch(
+                "scripts.host_orchestrator._extract",
+                side_effect=lambda archive, dest: _stage_swappy_libs(dest),
+            ),
+        ):
+            host_orchestrator._download_swappy(deps, up, dry_run=False)
+
+        dl.assert_called_once()
+
     def test_redownloads_when_marker_missing_or_stale(self, tmp_path):
         # A present-but-unmarked (or stale) dir is replaced and re-fetched at
         # the engine-pinned tag, then re-marked.
         deps = tmp_path / "deps"
         target = deps / "swappy"
-        (target / "godot-swappy").mkdir(parents=True)  # present, but no marker
+        _stage_swappy_libs(target)  # present, but no marker
         up = self._upstream_with_swappy(tmp_path)
-
-        def fake_extract(archive, dest):
-            (dest / "godot-swappy").mkdir(parents=True, exist_ok=True)
 
         with (
             mock.patch("scripts.host_orchestrator._download_with_retry") as dl,
             mock.patch(
-                "scripts.host_orchestrator._extract", side_effect=fake_extract
+                "scripts.host_orchestrator._extract",
+                side_effect=lambda archive, dest: _stage_swappy_libs(dest),
             ) as extract,
         ):
             host_orchestrator._download_swappy(deps, up, dry_run=False)
@@ -570,6 +608,113 @@ class TestDownloadSwappy:
         assert (target / ".dep-version").read_text().strip() == "from-source-2025-01-31"
         # The pinned tag must appear in the download URL.
         assert "from-source-2025-01-31" in dl.call_args.args[0]
+
+    def test_downloads_the_zip_the_engine_installer_names(self, tmp_path):
+        # The engine's installer consumes godot-swappy.zip and lays the ABI
+        # dirs out at the archive root; the 7z asset has a different shape.
+        deps = tmp_path / "deps"
+        up = self._upstream_with_swappy(tmp_path)
+
+        with (
+            mock.patch("scripts.host_orchestrator._download_with_retry") as dl,
+            mock.patch(
+                "scripts.host_orchestrator._extract",
+                side_effect=lambda archive, dest: _stage_swappy_libs(dest),
+            ),
+        ):
+            host_orchestrator._download_swappy(deps, up, dry_run=False)
+
+        url, archive = dl.call_args.args[0], dl.call_args.args[1]
+        assert url.endswith("/godot-swappy.zip")
+        assert Path(archive).name == "godot-swappy.zip"
+
+    def test_lays_out_arch_dirs_where_detect_swappy_probes(self, tmp_path):
+        # apply_swappy copies this dir verbatim into
+        # thirdparty/swappy-frame-pacing/, which detect_swappy() probes as
+        # <arch>/libswappy_static.a — so the ABI dirs must be at the top level.
+        deps = tmp_path / "deps"
+        up = self._upstream_with_swappy(tmp_path)
+
+        def fake_extract(archive, dest):
+            _stage_swappy_libs(dest)
+            (dest / "LICENSE").write_text("license")
+
+        with (
+            mock.patch("scripts.host_orchestrator._download_with_retry"),
+            mock.patch("scripts.host_orchestrator._extract", side_effect=fake_extract),
+        ):
+            host_orchestrator._download_swappy(deps, up, dry_run=False)
+
+        for arch in _SWAPPY_ARCHS:
+            assert (deps / "swappy" / arch / "libswappy_static.a").is_file()
+
+    def test_dry_run_leaves_an_existing_install_intact(self, tmp_path):
+        # A dry run must not destroy a stale install it merely reports on.
+        deps = tmp_path / "deps"
+        target = deps / "swappy"
+        _stage_swappy_libs(target, archs=("arm64-v8a",))
+        up = self._upstream_with_swappy(tmp_path)
+
+        with mock.patch("scripts.host_orchestrator._download_with_retry") as dl:
+            host_orchestrator._download_swappy(deps, up, dry_run=True)
+
+        dl.assert_not_called()
+        assert (target / "arm64-v8a" / "libswappy_static.a").is_file()
+
+    def test_raises_when_archive_lacks_an_arch_lib(self, tmp_path):
+        # A restructured archive must fail the build loudly instead of
+        # silently producing an Android build without frame pacing.
+        deps = tmp_path / "deps"
+        up = self._upstream_with_swappy(tmp_path)
+
+        with (
+            mock.patch("scripts.host_orchestrator._download_with_retry"),
+            mock.patch(
+                "scripts.host_orchestrator._extract",
+                side_effect=lambda archive, dest: _stage_swappy_libs(
+                    dest, archs=("arm64-v8a",)
+                ),
+            ),
+            pytest.raises(host_orchestrator._HostOrchestratorError, match="x86_64"),
+        ):
+            host_orchestrator._download_swappy(deps, up, dry_run=False)
+
+
+class TestEngineInstallStrList:
+    """ABI lists are read from the engine too, so an added ABI upstream is
+    picked up without editing this repo."""
+
+    def _upstream(self, tmp_path, body):
+        up = tmp_path / "upstream" / "godot"
+        scripts = up / "misc" / "scripts"
+        scripts.mkdir(parents=True, exist_ok=True)
+        (scripts / "install_swappy_android.py").write_text(body, encoding="utf-8")
+        return up
+
+    def test_parses_multiline_list_literal(self, tmp_path):
+        up = self._upstream(
+            tmp_path, _SWAPPY_INSTALL_SCRIPT.format(tag="from-source-2025-01-31")
+        )
+
+        assert host_orchestrator._engine_install_str_list(
+            up, "install_swappy_android.py", "swappy_archs"
+        ) == ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
+
+    def test_raises_when_list_is_absent(self, tmp_path):
+        up = self._upstream(tmp_path, 'swappy_tag = "t"\n')
+
+        with pytest.raises(host_orchestrator._HostOrchestratorError, match="archs"):
+            host_orchestrator._engine_install_str_list(
+                up, "install_swappy_android.py", "swappy_archs"
+            )
+
+    def test_raises_when_list_is_empty(self, tmp_path):
+        up = self._upstream(tmp_path, "swappy_archs = []\n")
+
+        with pytest.raises(host_orchestrator._HostOrchestratorError, match="archs"):
+            host_orchestrator._engine_install_str_list(
+                up, "install_swappy_android.py", "swappy_archs"
+            )
 
 
 class TestEngineInstallVersion:
@@ -1121,7 +1266,8 @@ class TestPhase3DockerInvocation:
         basedir = tmp_path / "build-godot-and-templates"
         basedir.mkdir()
         (basedir / "build-mono-glue").mkdir()
-        (basedir / "out" / "logs").mkdir(parents=True)
+        (basedir / "logs" / "20260101-120000").mkdir(parents=True)
+        run_logs_dir = basedir / "logs" / "20260101-120000"
         tarball = basedir / "godot-4.8.tar.gz"
         tarball.write_text("t")
         mono_glue = basedir / "mono-glue"
@@ -1138,7 +1284,7 @@ class TestPhase3DockerInvocation:
                 linux_image="ghcr.io/u/godot-linux:4.8",
                 tarball=tarball,
                 mono_glue_dir=mono_glue,
-                logs_dir=basedir / "out" / "logs",
+                run_logs_dir=run_logs_dir,
                 env={"CLASSICAL": "1", "MONO": "1"},
                 dry_run=False,
             )
@@ -1157,8 +1303,8 @@ class TestPhase3DockerInvocation:
         tarball.write_text("t")
         mono_glue = basedir / "mono-glue"
         mono_glue.mkdir()
-        logs_dir = basedir / "out" / "logs"
-        logs_dir.mkdir(parents=True)
+        run_logs_dir = basedir / "logs" / "20260101-120000"
+        run_logs_dir.mkdir(parents=True)
 
         captured: dict = {}
 
@@ -1172,8 +1318,8 @@ class TestPhase3DockerInvocation:
                 basedir=basedir,
                 tarball=tarball,
                 mono_glue_dir=mono_glue,
+                run_logs_dir=run_logs_dir,
                 out_plat=basedir / "out" / "linux",
-                logs_dir=logs_dir,
                 env={"CLASSICAL": "1"},
                 extra_mounts=["-v", f"{basedir}/build-linux:/root/build"],
                 dry_run=False,
@@ -1189,8 +1335,8 @@ class TestPhase3DockerInvocation:
         tarball.write_text("t")
         mono_glue = basedir / "mg"
         mono_glue.mkdir()
-        logs_dir = basedir / "logs"
-        logs_dir.mkdir()
+        run_logs_dir = basedir / "logs" / "20260101-120000"
+        run_logs_dir.mkdir(parents=True)
 
         for plat in ("windows", "android", "macos", "ios", "web"):
             captured: dict = {}
@@ -1208,7 +1354,7 @@ class TestPhase3DockerInvocation:
                     tarball=tarball,
                     mono_glue_dir=mono_glue,
                     out_plat=basedir / plat,
-                    logs_dir=logs_dir,
+                    run_logs_dir=run_logs_dir,
                     env={},
                     extra_mounts=[],
                     dry_run=False,

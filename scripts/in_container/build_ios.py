@@ -151,38 +151,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         godot_dir = common.setup_godot_source()
 
-        if classical:
-            logger.info("Starting classical build for iOS...")
-            # arm64 device
-            for target in ("template_debug", "template_release"):
-                common.run_scons(
-                    "platform=ios",
-                    *options,
-                    "arch=arm64",
-                    f"target={target}",
-                    *_IOS_DEVICE,
-                    *_APPLE_TARGET_ARM64,
-                    num_cores=num_cores,
-                    env=env,
-                    cwd=godot_dir,
-                )
-            # arm64 simulator disabled — cctools-port + current LLVM
-            # incompatibility (see godotengine/build-containers#85).
-            # x86_64 simulator
-            for target in ("template_debug", "template_release"):
-                common.run_scons(
-                    "platform=ios",
-                    *options,
-                    "arch=x86_64",
-                    f"target={target}",
-                    *_IOS_SIMULATOR,
-                    *_APPLE_TARGET_X86_64,
-                    num_cores=num_cores,
-                    env=env,
-                    cwd=godot_dir,
-                )
-            _copy_templates(godot_dir, out_root / "templates")
-
         if mono:
             logger.info("Starting Mono build for iOS...")
             common.copy_mono_glue(mono_glue_src, godot_dir, include_editor=False)
@@ -216,6 +184,43 @@ def main(argv: Sequence[str] | None = None) -> int:
                     cwd=godot_dir,
                 )
             _copy_templates(godot_dir, out_root / "templates-mono")
+
+        if mono and classical:
+            logger.info("Restarting from clean tarball for classical pass...")
+            shutil.rmtree(godot_dir)
+            godot_dir = common.setup_godot_source()
+
+        if classical:
+            logger.info("Starting classical build for iOS...")
+            # arm64 device
+            for target in ("template_debug", "template_release"):
+                common.run_scons(
+                    "platform=ios",
+                    *options,
+                    "arch=arm64",
+                    f"target={target}",
+                    *_IOS_DEVICE,
+                    *_APPLE_TARGET_ARM64,
+                    num_cores=num_cores,
+                    env=env,
+                    cwd=godot_dir,
+                )
+            # arm64 simulator disabled — cctools-port + current LLVM
+            # incompatibility (see godotengine/build-containers#85).
+            # x86_64 simulator
+            for target in ("template_debug", "template_release"):
+                common.run_scons(
+                    "platform=ios",
+                    *options,
+                    "arch=x86_64",
+                    f"target={target}",
+                    *_IOS_SIMULATOR,
+                    *_APPLE_TARGET_X86_64,
+                    num_cores=num_cores,
+                    env=env,
+                    cwd=godot_dir,
+                )
+            _copy_templates(godot_dir, out_root / "templates")
 
         logger.info("iOS build successful")
         return 0

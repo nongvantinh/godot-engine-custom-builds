@@ -72,9 +72,15 @@ def dispatch_build(
     container_version: str,
     platforms: list[str] | None = None,
     build_archs: list[str] | None = None,
+    force: bool = False,
     dry_run: bool = False,
+    run_logs_dir: Path | None = None,
 ) -> int:
     """Drive the host orchestrator to build the matrix in-process.
+
+    *force* rebuilds unconditionally: the per-platform ``out/`` and the Mono
+    glue skip guards are bypassed and their stale artifacts cleared first, so
+    a source change is guaranteed to be recompiled rather than re-packaged.
 
     Delegates to :func:`scripts.host_orchestrator.run_build` — generate the
     Mono glue once, acquire images, run per-platform docker passes with the
@@ -111,7 +117,9 @@ def dispatch_build(
         num_cores=num_cores,
         platforms=platforms,
         build_archs=build_archs,
+        force=force,
         dry_run=dry_run,
+        run_logs_dir=run_logs_dir,
     )
 
 

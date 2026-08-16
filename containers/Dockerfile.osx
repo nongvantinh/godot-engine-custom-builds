@@ -62,7 +62,7 @@ RUN bash -c 'set -euo pipefail; \
     base="https://download.swift.org/swiftly/linux"; \
     curl -fSsL -O "${base}/swiftly-${arch}.tar.gz"; \
     curl -fSsL -O "${base}/swiftly-${arch}.tar.gz.sig"; \
-    curl -fSsL https://swift.org/keys/all-keys.asc | gpg --import -; \
+    curl --compressed -fSsL https://swift.org/keys/all-keys.asc | gpg --import -; \
     gpg --verify "swiftly-${arch}.tar.gz.sig" "swiftly-${arch}.tar.gz"; \
     tar zxf "swiftly-${arch}.tar.gz"; \
     ./swiftly init --platform ubi9 --quiet-shell-followup -y; \

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -113,98 +114,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         # D3D12 SDK install — must run after tarball extract, before any scons.
         common.install_d3d12_sdk(godot_dir)
-
-        if classical:
-            logger.info("Starting classical build for Windows...")
-
-            # x86_64
-            _scons_chain(
-                godot_dir,
-                arch="x86_64",
-                extra=(),
-                targets=("editor",),
-                num_cores=num_cores,
-                env=env,
-            )
-            common.copy_and_clean_bin(bin_dir, out_root / "x86_64" / "tools")
-            _scons_chain(
-                godot_dir,
-                arch="x86_64",
-                extra=(),
-                targets=("template_debug", "template_release"),
-                num_cores=num_cores,
-                env=env,
-            )
-            common.copy_and_clean_bin(bin_dir, out_root / "x86_64" / "templates")
-
-            # x86_32
-            _scons_chain(
-                godot_dir,
-                arch="x86_32",
-                extra=(),
-                targets=("editor",),
-                num_cores=num_cores,
-                env=env,
-            )
-            common.copy_and_clean_bin(bin_dir, out_root / "x86_32" / "tools")
-            _scons_chain(
-                godot_dir,
-                arch="x86_32",
-                extra=(),
-                targets=("template_debug", "template_release"),
-                num_cores=num_cores,
-                env=env,
-            )
-            common.copy_and_clean_bin(bin_dir, out_root / "x86_32" / "templates")
-
-            # arm64 (llvm-mingw). First-class since ANGLE chromium/7219 — the
-            # rebuild the engine pins — resolves the old libc++ symbol clash
-            # that made 6601.2 fail to link against llvm-mingw.
-            _scons_chain(
-                godot_dir,
-                arch="arm64",
-                extra=_OPTIONS_LLVM,
-                targets=("editor",),
-                num_cores=num_cores,
-                env=env,
-            )
-            common.copy_and_clean_bin(bin_dir, out_root / "arm64" / "tools")
-            _scons_chain(
-                godot_dir,
-                arch="arm64",
-                extra=_OPTIONS_LLVM,
-                targets=("template_debug", "template_release"),
-                num_cores=num_cores,
-                env=env,
-            )
-            common.copy_and_clean_bin(bin_dir, out_root / "arm64" / "templates")
-
-            # Always cleanup bin/ (preserve build_deps) so Mono pass starts clean.
-            common.clean_bin_preserving(bin_dir)
-
-            # Steam build (x86_64 + x86_32 editor with steamapi=yes).
-            if steam:
-                build_name_save = os.environ.get("BUILD_NAME", "")
-                env_steam = dict(env)
-                env_steam["BUILD_NAME"] = "steam"
-                _scons_chain(
-                    godot_dir,
-                    arch="x86_64",
-                    extra=("steamapi=yes",),
-                    targets=("editor",),
-                    num_cores=num_cores,
-                    env=env_steam,
-                )
-                _scons_chain(
-                    godot_dir,
-                    arch="x86_32",
-                    extra=("steamapi=yes",),
-                    targets=("editor",),
-                    num_cores=num_cores,
-                    env=env_steam,
-                )
-                common.copy_and_clean_bin(bin_dir, out_root / "steam")
-                env["BUILD_NAME"] = build_name_save
 
         if mono:
             logger.info("Starting Mono build for Windows...")
@@ -290,6 +199,105 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "x86_64/x86_32 Mono outputs are unaffected."
                 )
 
+            common.clean_bin_preserving(bin_dir)
+
+        if mono and classical:
+            logger.info("Restarting from clean tarball for classical pass...")
+            shutil.rmtree(godot_dir)
+            godot_dir = common.setup_godot_source()
+            bin_dir = godot_dir / "bin"
+            common.install_d3d12_sdk(godot_dir)
+
+        if classical:
+            logger.info("Starting classical build for Windows...")
+
+            # x86_64
+            _scons_chain(
+                godot_dir,
+                arch="x86_64",
+                extra=(),
+                targets=("editor",),
+                num_cores=num_cores,
+                env=env,
+            )
+            common.copy_and_clean_bin(bin_dir, out_root / "x86_64" / "tools")
+            _scons_chain(
+                godot_dir,
+                arch="x86_64",
+                extra=(),
+                targets=("template_debug", "template_release"),
+                num_cores=num_cores,
+                env=env,
+            )
+            common.copy_and_clean_bin(bin_dir, out_root / "x86_64" / "templates")
+
+            # x86_32
+            _scons_chain(
+                godot_dir,
+                arch="x86_32",
+                extra=(),
+                targets=("editor",),
+                num_cores=num_cores,
+                env=env,
+            )
+            common.copy_and_clean_bin(bin_dir, out_root / "x86_32" / "tools")
+            _scons_chain(
+                godot_dir,
+                arch="x86_32",
+                extra=(),
+                targets=("template_debug", "template_release"),
+                num_cores=num_cores,
+                env=env,
+            )
+            common.copy_and_clean_bin(bin_dir, out_root / "x86_32" / "templates")
+
+            # arm64 (llvm-mingw). First-class since ANGLE chromium/7219 — the
+            # rebuild the engine pins — resolves the old libc++ symbol clash
+            # that made 6601.2 fail to link against llvm-mingw.
+            _scons_chain(
+                godot_dir,
+                arch="arm64",
+                extra=_OPTIONS_LLVM,
+                targets=("editor",),
+                num_cores=num_cores,
+                env=env,
+            )
+            common.copy_and_clean_bin(bin_dir, out_root / "arm64" / "tools")
+            _scons_chain(
+                godot_dir,
+                arch="arm64",
+                extra=_OPTIONS_LLVM,
+                targets=("template_debug", "template_release"),
+                num_cores=num_cores,
+                env=env,
+            )
+            common.copy_and_clean_bin(bin_dir, out_root / "arm64" / "templates")
+
+            # Steam build (x86_64 + x86_32 editor with steamapi=yes).
+            if steam:
+                build_name_save = os.environ.get("BUILD_NAME", "")
+                env_steam = dict(env)
+                env_steam["BUILD_NAME"] = "steam"
+                _scons_chain(
+                    godot_dir,
+                    arch="x86_64",
+                    extra=("steamapi=yes",),
+                    targets=("editor",),
+                    num_cores=num_cores,
+                    env=env_steam,
+                )
+                _scons_chain(
+                    godot_dir,
+                    arch="x86_32",
+                    extra=("steamapi=yes",),
+                    targets=("editor",),
+                    num_cores=num_cores,
+                    env=env_steam,
+                )
+                common.copy_and_clean_bin(bin_dir, out_root / "steam")
+                env["BUILD_NAME"] = build_name_save
+
+            # Always cleanup bin/ (preserve build_deps) after the classical pass.
             common.clean_bin_preserving(bin_dir)
 
         logger.info("Windows build successful")

@@ -126,6 +126,7 @@ class TestBuildMonoGlue:
         assert len(scons_args) == 1
         flags = scons_args[0]
         assert "platform=linuxbsd" in flags
+        assert "arch=x86_64" in flags
         assert "target=editor" in flags
         assert "module_mono_enabled=yes" in flags
         assert "module_dotnet_enabled=yes" in flags

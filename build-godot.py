@@ -74,6 +74,7 @@ from scripts.orchestrator import (
     publish_release,
 )
 from scripts import platforms
+from scripts.build_logs import allocate_run_logs_dir, attach_release_file_handler
 from scripts.patcher import apply_patches
 from scripts.scons_args import SconsDerivationError, derive_invocations
 
@@ -321,6 +322,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Skip building; reuse existing out/.",
     )
     release_p.add_argument(
+        "--force",
+        dest="force",
+        action="store_true",
+        default=False,
+        help=(
+            "Force a full rebuild: bypass the per-platform out/ and Mono-glue "
+            "skip guards and clear their stale artifacts first, so a source "
+            "change is recompiled instead of re-packaged. (default: off)"
+        ),
+    )
+    release_p.add_argument(
         "--package",
         dest="do_package",
         action="store_true",
@@ -508,6 +520,27 @@ def _resolve_matrix_for_platform(
     return platform_flags, [inv.to_command() for inv in invocations]
 
 
+def _resolve_env_setup(env_setup: str, scons_flags: str) -> str:
+    """Substitute arch placeholders in *env_setup* using *scons_flags*' arch.
+
+    Each derived SCons command carries its own ``arch=<arch>`` token, but a
+    platform's ``env_setup`` is a single string shared across every arch. On
+    Linux the buildroot cross-compiler is arch-specific (the container exposes
+    ``GODOT_SDK_LINUX_X86_64`` / ``_X86_32`` / ``_ARM64`` / ``_ARM32``), so the
+    ``env_setup`` template names the SDK as ``$GODOT_SDK_LINUX_{arch_upper}``
+    and we resolve ``{arch}`` / ``{arch_upper}`` per invocation here. A template
+    with no placeholder is returned unchanged.
+    """
+    if "{arch" not in env_setup:
+        return env_setup
+    arch = ""
+    for token in scons_flags.split():
+        if token.startswith("arch="):
+            arch = token[len("arch=") :]
+            break
+    return env_setup.replace("{arch_upper}", arch.upper()).replace("{arch}", arch)
+
+
 def _build_platform(
     platform: str,
     scons_commands: list[str],
@@ -596,7 +629,9 @@ def _build_platform(
                 source_dir=str(source_dir.resolve()),
                 output_dir=str(output_dir.resolve()),
                 dry_run=dry_run,
-                env_setup=platform_cfg.get("env_setup", ""),
+                env_setup=_resolve_env_setup(
+                    platform_cfg.get("env_setup", ""), scons_flags
+                ),
             )
             if rc != 0:
                 logger.error("Build exited with code %d.", rc)
@@ -705,10 +740,11 @@ def cmd_containers(args: argparse.Namespace) -> int:
 
 def _parse_platforms(raw: str) -> list[str]:
     """Expand the --platform CSV (handling 'all') into a concrete list."""
+    from scripts import platforms as platform_registry
+
     items = [p.strip().lower() for p in raw.split(",") if p.strip()]
     if "all" in items:
-        # Canonical build order: desktop Mono editor first (§6 risk mitigation).
-        return ["linux", "windows", "macos", "android", "web", "ios"]
+        return platform_registry.release_order()
     return items
 
 
@@ -755,7 +791,7 @@ def cmd_build(args: argparse.Namespace) -> int:
 
     # Resolve source directory.
     source_dir = _resolve_source_dir(args.godot_repo)
-    output_dir = _SCRIPT_DIR / "output"
+    output_dir = _BUILD_AND_TEMPLATES_DIR / "output"
 
     # Apply patches before building.
     try:
@@ -873,12 +909,18 @@ def cmd_release(args: argparse.Namespace) -> int:
 
     stages = ResultTable("Release summary", ["Stage", "Status"], status_column=1)
 
+    run_logs_dir = allocate_run_logs_dir(
+        _BUILD_AND_TEMPLATES_DIR, dry_run=args.dry_run
+    )
+    release_log_handler = attach_release_file_handler(run_logs_dir / "release.log")
+
     # --- Build (host orchestrator: deps + tarball + per-platform docker passes) ---
     if args.do_build:
         section(
             "Build",
             f"build_type={build_type}  platforms={','.join(platforms)}  "
-            f"jobs={num_cores}",
+            f"jobs={num_cores}"
+            f"{'  force=on' if args.force else ''}",
         )
         rc = dispatch_build(
             build_dir=_BUILD_AND_TEMPLATES_DIR,
@@ -891,7 +933,9 @@ def cmd_release(args: argparse.Namespace) -> int:
             container_version=godot_version,
             platforms=platforms,
             build_archs=build_archs,
+            force=args.force,
             dry_run=args.dry_run,
+            run_logs_dir=run_logs_dir,
         )
         if rc != 0:
             logger.error("Build step exited with code %d.", rc)
@@ -1023,6 +1067,10 @@ def cmd_release(args: argparse.Namespace) -> int:
     # publishing — it recursively chowns many GB, and an interruption here must
     # not cost the build/publish work that already succeeded. It never raises.
     _chown_outputs(_BUILD_AND_TEMPLATES_DIR, dry_run=args.dry_run)
+
+    logging.getLogger().removeHandler(release_log_handler)
+    release_log_handler.close()
+    logger.info("Run logs written under %s", run_logs_dir)
 
     stages.print()
     return 0

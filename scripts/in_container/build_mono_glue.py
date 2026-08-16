@@ -86,6 +86,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         common.run_scons(
             "platform=linuxbsd",
+            "arch=x86_64",
             *_GODOT_OPTIONS,
             "target=editor",
             "module_mono_enabled=yes",

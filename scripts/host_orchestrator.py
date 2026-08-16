@@ -26,7 +26,8 @@ Responsibilities:
      fails. Each platform mounts the source tarball, mono-glue and the
      platform-specific deps. Env vars threaded into the container:
      ``BUILD_NAME``, ``GODOT_VERSION_STATUS``, ``NUM_CORES``, ``CLASSICAL``,
-     ``MONO``. ``tee``-style log fan-out into ``out/logs/<plat>``.
+     ``MONO``. Per-run logs under ``logs/<run-id>/``; each scons arch/target
+     pass writes its own log file inside the container log mount.
   7. ``--clean-release`` / ``--cleanup`` — exposed as the ``mode`` kwarg.
 
 The cosmetic ``chown`` of build outputs back to the invoking user is NOT done
@@ -71,10 +72,11 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
-from scripts import platforms
+from scripts import build_logs, platforms
 from scripts.console import section, spinner, summary_table
 
 logger = logging.getLogger(__name__)
@@ -109,6 +111,11 @@ _ANGLE_ARCH_VARIANTS: tuple[tuple[str, str], ...] = (
     ("macos_x86_64.zip", "x86_64-macos"),
 )
 
+# The one file per Android ABI that ``platform/android/detect.py`` probes for
+# (``detect_swappy``) and links as ``swappy_static``. The ABI list itself comes
+# from the engine (``swappy_archs``), so an added ABI needs no edit here.
+_SWAPPY_LIB = "libswappy_static.a"
+
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -132,8 +139,10 @@ def run_build(
     platforms: list[str] | None = None,
     build_archs: list[str] | None = None,
     skip_download_containers: bool = False,
+    force: bool = False,
     build_name: str = "",
     version_status_patch: str = "",
+    run_logs_dir: Path | None = None,
     dry_run: bool = False,
     mode: _Mode = "build",
 ) -> int:
@@ -212,11 +221,11 @@ def run_build(
         )
 
         out_dir = basedir / "out"
-        logs_dir = out_dir / "logs"
         mono_glue_dir = basedir / "mono-glue"
+        if run_logs_dir is None:
+            run_logs_dir = build_logs.allocate_run_logs_dir(basedir, dry_run=dry_run)
         if not dry_run:
             out_dir.mkdir(parents=True, exist_ok=True)
-            logs_dir.mkdir(parents=True, exist_ok=True)
             mono_glue_dir.mkdir(parents=True, exist_ok=True)
 
         build_classical, build_mono = _resolve_build_flags(build_type)
@@ -226,6 +235,7 @@ def run_build(
             "NUM_CORES": str(num_cores),
             "CLASSICAL": "1" if build_classical else "0",
             "MONO": "1" if build_mono else "0",
+            "GODOT_LOG_DIR": "/root/logs",
         }
         # Restrict the in-container arch matrix when requested. Unset (empty)
         # means "every arch the container supports" — the historical default.
@@ -234,7 +244,10 @@ def run_build(
         tarball_path = basedir / f"godot-{godot_version}.tar.gz"
 
         # --- Mono glue ---
-        if _mono_glue_has_artifacts(mono_glue_dir):
+        if force and not dry_run and _mono_glue_has_artifacts(mono_glue_dir):
+            logger.info("Force rebuild: clearing mono-glue at %s", mono_glue_dir)
+            shutil.rmtree(mono_glue_dir, ignore_errors=True)
+        if not force and _mono_glue_has_artifacts(mono_glue_dir):
             logger.info(
                 "Skipping mono-glue: %s already populated. Delete it to force a rebuild.",
                 mono_glue_dir,
@@ -252,7 +265,7 @@ def run_build(
                 linux_image=images["linux"],
                 tarball=tarball_path,
                 mono_glue_dir=mono_glue_dir,
-                logs_dir=logs_dir,
+                run_logs_dir=run_logs_dir,
                 env=common_env,
                 dry_run=dry_run,
             )
@@ -266,9 +279,12 @@ def run_build(
             if scope is not None and plat not in scope:
                 continue
             out_plat = out_dir / plat
+            if force and not dry_run and _platform_has_artifacts(out_plat):
+                logger.info("Force rebuild: clearing artifacts at %s", out_plat)
+                shutil.rmtree(out_plat, ignore_errors=True)
             if not dry_run:
                 out_plat.mkdir(parents=True, exist_ok=True)
-            if _platform_has_artifacts(out_plat):
+            if not force and _platform_has_artifacts(out_plat):
                 logger.info(
                     "Skipping %s: artifacts already present in %s. "
                     "Delete them to force a rebuild.",
@@ -285,9 +301,9 @@ def run_build(
                 basedir=basedir,
                 tarball=tarball_path,
                 mono_glue_dir=mono_glue_dir,
+                run_logs_dir=run_logs_dir,
                 out_plat=out_plat,
-                logs_dir=logs_dir,
-                env={**common_env, **extra_env},
+                env={**common_env, **extra_env, "GODOT_BUILD_PLATFORM": plat},
                 extra_mounts=extra_mounts,
                 dry_run=dry_run,
             )
@@ -419,6 +435,36 @@ def _engine_install_version(
             f"callers to match."
         )
     return match.group(1)
+
+
+def _engine_install_str_list(
+    upstream_godot_dir: Path, script_name: str, var_name: str
+) -> list[str]:
+    """Read a list-of-strings pin (e.g. ``swappy_archs``) from the engine.
+
+    Same single-source-of-truth contract as :func:`_engine_install_version`,
+    for pins the engine expresses as a literal list. Fails loud when the
+    assignment is absent or empty so an upstream restructure surfaces here
+    instead of silently producing a short arch list.
+    """
+    script = upstream_godot_dir / "misc" / "scripts" / script_name
+    if not script.is_file():
+        raise _HostOrchestratorError(
+            f"Engine dependency pin script not found: {script}. Cannot resolve "
+            f"{var_name} — the Godot submodule may be missing or restructured."
+        )
+    text = script.read_text(encoding="utf-8")
+    match = re.search(
+        rf"^\s*{re.escape(var_name)}\s*=\s*\[(.*?)\]", text, re.MULTILINE | re.DOTALL
+    )
+    values = re.findall(r"[\"']([^\"']+)[\"']", match.group(1)) if match else []
+    if not values:
+        raise _HostOrchestratorError(
+            f"Could not find a non-empty `{var_name}` list in {script}. The "
+            f"engine may have renamed or restructured the pin; update "
+            f"_engine_install_str_list callers to match."
+        )
+    return values
 
 
 def _dep_marker_current(target: Path, version: str) -> bool:
@@ -596,35 +642,62 @@ def _download_winrt(
 def _download_swappy(
     deps_root: Path, upstream_godot_dir: Path, *, dry_run: bool
 ) -> None:
+    """Stage Swappy exactly as ``misc/scripts/install_swappy_android.py`` does.
+
+    The engine's installer is the contract: it downloads ``swappy_filename``
+    from the ``swappy_tag`` release and lays out
+    ``<arch>/libswappy_static.a`` for every arch in ``swappy_archs`` under
+    ``thirdparty/swappy-frame-pacing/``. ``platform/android/detect.py``
+    (``detect_swappy``) probes exactly those paths, so the deps dir we hand to
+    the Android container — copied verbatim into that thirdparty dir by
+    :func:`scripts.in_container.common.apply_swappy` — must have the same
+    arch-at-top-level shape. Filename, tag and arch list are all read from the
+    engine script so a rename or an added ABI upstream cannot drift.
+    """
     tag = _engine_install_version(
         upstream_godot_dir, "install_swappy_android.py", "swappy_tag"
     )
+    filename = _engine_install_version(
+        upstream_godot_dir, "install_swappy_android.py", "swappy_filename"
+    )
+    archs = _engine_install_str_list(
+        upstream_godot_dir, "install_swappy_android.py", "swappy_archs"
+    )
     url = (
         "https://github.com/godotengine/godot-swappy/releases/download/"
-        f"{tag}/godot-swappy.7z"
+        f"{tag}/{filename}"
     )
     target = deps_root / "swappy"
-    # godot-swappy.7z extracts to a `godot-swappy/` subdir.
-    sentinel = target / "godot-swappy"
-    if (
-        sentinel.is_dir()
-        and any(sentinel.iterdir())
-        and _dep_marker_current(target, tag)
-    ):
+    if _swappy_libs_present(target, archs) and _dep_marker_current(target, tag):
         logger.info("Swappy %s already extracted under %s; skipping.", tag, target)
         return
-    if target.is_dir():
-        shutil.rmtree(target)  # stale/partial -> replace
-    target.mkdir(parents=True, exist_ok=True)
     logger.info("Fetching Swappy %s (engine-pinned) into %s", tag, target)
     if dry_run:
         logger.info("[dry-run] Would download %s into %s", url, target)
         return
-    archive = target / "godot-swappy.7z"
+    if target.is_dir():
+        shutil.rmtree(target)  # stale/partial -> replace
+    target.mkdir(parents=True, exist_ok=True)
+    archive = target / filename
     _download_with_retry(url, archive)
     _extract(archive, target)
     archive.unlink(missing_ok=True)
+    if not _swappy_libs_present(target, archs):
+        missing = [
+            arch for arch in archs if not (target / arch / _SWAPPY_LIB).is_file()
+        ]
+        raise _HostOrchestratorError(
+            f"Swappy archive {url} did not yield {_SWAPPY_LIB} for: "
+            f"{', '.join(missing)}. Expected arch dirs at the archive root, "
+            f"matching install_swappy_android.py."
+        )
     _write_dep_marker(target, tag)
+
+
+def _swappy_libs_present(target: Path, archs: Sequence[str]) -> bool:
+    return bool(archs) and all(
+        (target / arch / _SWAPPY_LIB).is_file() for arch in archs
+    )
 
 
 def _prepare_android_sign_keystore(deps_root: Path, *, dry_run: bool) -> None:
@@ -950,12 +1023,16 @@ def _run_build_mono_glue(
     linux_image: str,
     tarball: Path,
     mono_glue_dir: Path,
-    logs_dir: Path,
+    run_logs_dir: Path,
     env: dict[str, str],
     dry_run: bool,
 ) -> None:
     del basedir  # mono glue no longer needs a host-side build/ dir mount.
-    args = _common_docker_args(tarball=tarball, mono_glue_dir=mono_glue_dir, env=env)
+    glue_env = {**env, "GODOT_BUILD_PLATFORM": "mono-glue"}
+    args = _common_docker_args(
+        tarball=tarball, mono_glue_dir=mono_glue_dir, env=glue_env
+    )
+    args.extend(["-v", f"{run_logs_dir}:/root/logs"])
     args.extend(
         [
             linux_image,
@@ -964,7 +1041,11 @@ def _run_build_mono_glue(
             "scripts.in_container.build_mono_glue",
         ]
     )
-    _run_and_tee(args, log_path=logs_dir / "mono-glue", dry_run=dry_run)
+    _run_and_tee(
+        args,
+        log_path=build_logs.mono_glue_container_log(run_logs_dir),
+        dry_run=dry_run,
+    )
 
 
 def _iter_platforms(
@@ -1002,8 +1083,8 @@ def _run_build_platform(
     basedir: Path,
     tarball: Path,
     mono_glue_dir: Path,
+    run_logs_dir: Path,
     out_plat: Path,
-    logs_dir: Path,
     env: dict[str, str],
     extra_mounts: list[str],
     dry_run: bool,
@@ -1011,6 +1092,7 @@ def _run_build_platform(
     del out_plat  # mount path is already encoded in extra_mounts
     del basedir  # only used by mono-glue; per-platform mounts come from extra_mounts
     args = _common_docker_args(tarball=tarball, mono_glue_dir=mono_glue_dir, env=env)
+    args.extend(["-v", f"{run_logs_dir}:/root/logs"])
     args.extend(extra_mounts)
     # The host's scripts/ dir is mounted at /root/build-scripts/scripts
     # (read-only) and PYTHONPATH points at its parent /root/build-scripts
@@ -1024,8 +1106,11 @@ def _run_build_platform(
             f"scripts.in_container.build_{name}",
         ]
     )
-    log_path = logs_dir / name
-    _run_and_tee(args, log_path=log_path, dry_run=dry_run)
+    _run_and_tee(
+        args,
+        log_path=build_logs.platform_container_log(run_logs_dir, name),
+        dry_run=dry_run,
+    )
 
 
 def _run_and_tee(
@@ -1036,8 +1121,10 @@ def _run_and_tee(
 ) -> None:
     """Run *cmd* with combined stderr→stdout, fan-out lines to host stdout and *log_path*.
 
-    Equivalent to ``2>&1 | tee out/logs/<plat>``: every line lands on both the
-    operator's terminal and the per-platform log file. A non-zero docker exit
+    Equivalent to ``2>&1 | tee logs/<run-id>/<plat>/container.log``: high-level
+    container output lands on both the operator's terminal and the platform
+    ``container.log``. Verbose scons output is written per arch/target under
+    the same run directory by the in-container build scripts.
     aborts the run by raising :class:`_HostOrchestratorError`.
     """
     if dry_run:
@@ -1144,7 +1231,15 @@ def _walk_tree(root: Path):
 # ---------------------------------------------------------------------------
 
 
-_CLEAN_RELEASE_PATHS = ("mono-glue", "out", "releases", "tmp", "web", "sha512sums")
+_CLEAN_RELEASE_PATHS = (
+    "mono-glue",
+    "out",
+    "releases",
+    "tmp",
+    "logs",
+    "web",
+    "sha512sums",
+)
 _CLEANUP_EXTRA_PATHS = ("git", "deps")
 
 
@@ -1261,8 +1356,8 @@ def _extract(archive: Path, dest: Path) -> None:
         return
     if name.endswith(".7z"):
         # 7z extraction is delegated to the host ``7z x`` binary. Path
-        # traversal in 7z archives is the host tool's responsibility — we
-        # only consume Swappy from a trusted GitHub Release, and any
+        # traversal in 7z archives is that tool's responsibility — every
+        # archive we consume comes from a trusted GitHub Release, and any
         # general-purpose 7z hardening belongs in the 7z package itself.
         _extract_7z(archive, dest)
         return

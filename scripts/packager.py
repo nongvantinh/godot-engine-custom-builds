@@ -2,8 +2,17 @@
 
 This module owns the post-build packaging step for ``build-godot.py release``:
 turning the per-platform ``out/<plat>/<arch>/{tools,templates,...}/`` artifacts
-into the editor zips, ``templates/`` staging, ``.tpz`` export-template bundles,
+into the editor zips, ``releases/`` publish tree, ``.tpz`` export-template bundles,
 and ``SHA512-SUMS.txt`` files that get uploaded to a GitHub Release.
+
+Layout after packaging:
+
+* ``out/`` — raw container build outputs (source of truth for binaries).
+* ``releases/<version>/`` — editor zips, standalone Android assets, ``.tpz`` bundles.
+* ``tmp/staging/`` — ephemeral workspace only (macOS ``.app`` bundles, iOS xcode
+  tree, intermediate ``macos.zip`` / ``ios.zip``). Template binaries are read
+  directly from ``out/`` when assembling ``.tpz`` files — no ``tmp/templates/``
+  duplicate tree.
 
 Notes on platform-specific edge cases:
 
@@ -34,12 +43,42 @@ import logging
 import shutil
 import zipfile
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from scripts.console import summary_table
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _TpzBuilder:
+    """Collect template artifacts for a ``.tpz`` without copying them to ``tmp/``.
+
+    Entries reference files under ``out/`` (or ephemeral zip intermediates under
+    ``tmp/staging/``) and are written straight into the export-template bundle.
+    """
+
+    _entries: list[tuple[Path, str]] = field(default_factory=list)
+
+    def add(self, src: Path, tpz_basename: str) -> None:
+        self._entries.append((src, tpz_basename))
+
+    def write(self, output_path: Path, version_text: str) -> None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(
+            output_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9
+        ) as zf:
+            zf.writestr("templates/version.txt", version_text + "\n")
+            for src, name in sorted(self._entries, key=lambda item: item[1]):
+                zf.write(src, arcname=f"templates/{name}")
+        if self._entries:
+            logger.info("Created TPZ %s", output_path)
+        else:
+            logger.info(
+                "Created TPZ %s with version.txt only (no template binaries).",
+                output_path,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -106,9 +145,9 @@ def package_release(
     out_dir = basedir / "out"
     release_dir = basedir / "releases" / binaries_version
     release_dir_mono = release_dir / "mono"
-    tmp_dir = basedir / "tmp"
-    templates_dir = tmp_dir / "templates"
-    templates_dir_mono = tmp_dir / "mono" / "templates"
+    staging_root = basedir / "tmp" / "staging"
+    tpz_classical = _TpzBuilder()
+    tpz_mono = _TpzBuilder()
 
     if upstream_godot_dir is None:
         upstream_godot_dir = (basedir.parent / "upstream" / "godot").resolve()
@@ -123,53 +162,63 @@ def package_release(
         logger.info("[dry-run] Would prepare release directories and stage artifacts.")
         return 0
 
-    # Reset the release and templates staging dirs so a re-run is deterministic.
-    for d in (release_dir, release_dir_mono, templates_dir, templates_dir_mono):
+    # Reset release dirs and ephemeral packaging workspace so a re-run is deterministic.
+    for d in (release_dir, release_dir_mono, staging_root):
         if d.exists():
             shutil.rmtree(d)
         d.mkdir(parents=True, exist_ok=True)
 
-    # --- Classical ---
-    _package_linux_classical(out_dir, release_dir, templates_dir, godot_basename)
-    _package_windows_classical(out_dir, release_dir, templates_dir, godot_basename)
-    _package_macos_classical(
-        out_dir, release_dir, templates_dir, godot_basename, upstream_godot_dir
+    # --- Mono first (matches in-container build order) ---
+    _package_linux_mono(
+        out_dir, release_dir_mono, tpz_mono, godot_basename
     )
-    _package_web_classical(out_dir, release_dir, templates_dir, godot_basename)
-    _package_android_classical(
-        out_dir, release_dir, templates_dir, godot_basename, templates_version
-    )
-    _package_ios_classical(basedir, out_dir, templates_dir, upstream_godot_dir)
-
-    _create_tpz_bundle(
-        templates_dir,
-        release_dir / f"{godot_basename}_export_templates.tpz",
-        templates_version,
-    )
-    _generate_sha512sums(release_dir, recurse_mono=False)
-
-    # --- Mono ---
-    _package_linux_mono(out_dir, release_dir_mono, templates_dir_mono, godot_basename)
-    _package_windows_mono(out_dir, release_dir_mono, templates_dir_mono, godot_basename)
+    _package_windows_mono(out_dir, release_dir_mono, tpz_mono, godot_basename)
     _package_macos_mono(
         out_dir,
         release_dir_mono,
-        templates_dir_mono,
+        tpz_mono,
         godot_basename,
         upstream_godot_dir,
+        staging_root / "mono",
     )
-    _package_web_mono(out_dir, templates_dir_mono)
+    _package_web_mono(out_dir, tpz_mono)
     _package_android_mono(
-        out_dir, release_dir_mono, templates_dir_mono, godot_basename, templates_version
+        out_dir, release_dir_mono, tpz_mono, godot_basename, templates_version
     )
-    _package_ios_mono(basedir, out_dir, templates_dir_mono, upstream_godot_dir)
+    _package_ios_mono(
+        basedir, out_dir, tpz_mono, upstream_godot_dir, staging_root / "mono"
+    )
 
-    _create_tpz_bundle(
-        templates_dir_mono,
+    tpz_mono.write(
         release_dir_mono / f"{godot_basename}_mono_export_templates.tpz",
         f"{templates_version}.mono",
     )
     _generate_sha512sums(release_dir_mono, recurse_mono=False)
+
+    # --- Classical ---
+    _package_linux_classical(out_dir, release_dir, tpz_classical, godot_basename)
+    _package_windows_classical(out_dir, release_dir, tpz_classical, godot_basename)
+    _package_macos_classical(
+        out_dir,
+        release_dir,
+        tpz_classical,
+        godot_basename,
+        upstream_godot_dir,
+        staging_root / "classical",
+    )
+    _package_web_classical(out_dir, release_dir, tpz_classical, godot_basename)
+    _package_android_classical(
+        out_dir, release_dir, tpz_classical, godot_basename, templates_version
+    )
+    _package_ios_classical(
+        basedir, out_dir, tpz_classical, upstream_godot_dir, staging_root / "classical"
+    )
+
+    tpz_classical.write(
+        release_dir / f"{godot_basename}_export_templates.tpz",
+        templates_version,
+    )
+    _generate_sha512sums(release_dir, recurse_mono=False)
 
     logger.info("Packaging complete: %s", release_dir)
     _print_release_artifacts_table(release_dir)
@@ -254,7 +303,7 @@ def _windows_bin_infix(arch: str) -> str:
 def _package_linux_classical(
     out_dir: Path,
     release_dir: Path,
-    templates_dir: Path,
+    tpz: _TpzBuilder,
     godot_basename: str,
 ) -> None:
     logger.info("Packaging Linux (classical)...")
@@ -289,9 +338,9 @@ def _package_linux_classical(
         ):
             for variant in ("release", "debug"):
                 src = templates_src / f"godot.linuxbsd.template_{variant}.{arch}"
-                dest = templates_dir / f"linux_{variant}.{arch}"
+                tpz_name = f"linux_{variant}.{arch}"
                 if src.is_file():
-                    shutil.copy2(src, dest)
+                    tpz.add(src, tpz_name)
                 else:
                     logger.warning(
                         "Linux template %s missing for arch '%s'.", variant, arch
@@ -307,7 +356,7 @@ def _package_linux_classical(
 def _package_linux_mono(
     out_dir: Path,
     release_dir_mono: Path,
-    templates_dir_mono: Path,
+    tpz: _TpzBuilder,
     godot_basename: str,
 ) -> None:
     logger.info("Packaging Linux (mono)...")
@@ -351,9 +400,9 @@ def _package_linux_mono(
         ):
             for variant in ("release", "debug"):
                 src = templates_src / f"godot.linuxbsd.template_{variant}.{arch}.mono"
-                dest = templates_dir_mono / f"linux_{variant}.{arch}"
+                tpz_name = f"linux_{variant}.{arch}"
                 if src.is_file():
-                    shutil.copy2(src, dest)
+                    tpz.add(src, tpz_name)
         else:
             logger.warning(
                 "Skipping Linux mono templates for arch '%s': %s missing or empty.",
@@ -370,7 +419,7 @@ def _package_linux_mono(
 def _package_windows_classical(
     out_dir: Path,
     release_dir: Path,
-    templates_dir: Path,
+    tpz: _TpzBuilder,
     godot_basename: str,
 ) -> None:
     logger.info("Packaging Windows (classical)...")
@@ -426,8 +475,7 @@ def _package_windows_classical(
                         / f"godot.windows.template_{variant}.{arch}{infix}{suffix}.exe"
                     )
                     if src.is_file():
-                        dest = templates_dir / f"windows_{variant}_{out_suffix}.exe"
-                        shutil.copy2(src, dest)
+                        tpz.add(src, f"windows_{variant}_{out_suffix}.exe")
         else:
             logger.warning(
                 "Skipping Windows templates for arch '%s': %s missing or empty.",
@@ -439,7 +487,7 @@ def _package_windows_classical(
 def _package_windows_mono(
     out_dir: Path,
     release_dir_mono: Path,
-    templates_dir_mono: Path,
+    tpz: _TpzBuilder,
     godot_basename: str,
 ) -> None:
     logger.info("Packaging Windows (mono)...")
@@ -499,10 +547,7 @@ def _package_windows_mono(
                         / f"godot.windows.template_{variant}.{arch}{infix}.mono{suffix}.exe"
                     )
                     if src.is_file():
-                        dest = (
-                            templates_dir_mono / f"windows_{variant}_{out_suffix}.exe"
-                        )
-                        shutil.copy2(src, dest)
+                        tpz.add(src, f"windows_{variant}_{out_suffix}.exe")
         else:
             logger.warning(
                 "Skipping Windows mono templates for arch '%s': %s missing or empty.",
@@ -527,9 +572,10 @@ def _find_macos_template_dir(upstream_godot_dir: Path, name: str) -> Path | None
 def _package_macos_classical(
     out_dir: Path,
     release_dir: Path,
-    templates_dir: Path,
+    tpz: _TpzBuilder,
     godot_basename: str,
     upstream_godot_dir: Path,
+    staging: Path,
 ) -> None:
     logger.info("Packaging macOS (classical)...")
     tools_dir = out_dir / "macos" / "tools"
@@ -542,7 +588,7 @@ def _package_macos_classical(
         tools_dir, ("godot.macos.editor.universal",)
     ):
         binname = f"{godot_basename}_macos.universal"
-        stage = templates_dir.parent / "Godot.app"
+        stage = staging / "Godot.app"
         if stage.exists():
             shutil.rmtree(stage)
         shutil.copytree(macos_tools, stage)
@@ -570,7 +616,7 @@ def _package_macos_classical(
         ),
         require_all=False,
     ):
-        stage = templates_dir.parent / "macos_template.app"
+        stage = staging / "macos_template.app"
         if stage.exists():
             shutil.rmtree(stage)
         shutil.copytree(macos_template, stage)
@@ -581,9 +627,9 @@ def _package_macos_classical(
                 dest = stage / "Contents" / "MacOS" / f"godot_macos_{variant}.universal"
                 shutil.copy2(src, dest)
                 dest.chmod(dest.stat().st_mode | 0o111)
-        _zip_directory(
-            stage, templates_dir / "macos.zip", arcname_root="macos_template.app"
-        )
+        macos_zip = staging / "macos.zip"
+        _zip_directory(stage, macos_zip, arcname_root="macos_template.app")
+        tpz.add(macos_zip, "macos.zip")
         shutil.rmtree(stage)
     else:
         logger.warning(
@@ -597,9 +643,10 @@ def _package_macos_classical(
 def _package_macos_mono(
     out_dir: Path,
     release_dir_mono: Path,
-    templates_dir_mono: Path,
+    tpz: _TpzBuilder,
     godot_basename: str,
     upstream_godot_dir: Path,
+    staging: Path,
 ) -> None:
     logger.info("Packaging macOS (mono)...")
     tools_dir = out_dir / "macos" / "tools-mono"
@@ -614,7 +661,7 @@ def _package_macos_mono(
         and sharp_dir.is_dir()
     ):
         binname = f"{godot_basename}_mono_macos.universal"
-        stage = templates_dir_mono.parent / "Godot_mono.app"
+        stage = staging / "Godot_mono.app"
         if stage.exists():
             shutil.rmtree(stage)
         shutil.copytree(macos_tools, stage)
@@ -649,7 +696,7 @@ def _package_macos_mono(
         ),
         require_all=False,
     ):
-        stage = templates_dir_mono.parent / "macos_template.app"
+        stage = staging / "macos_template.app"
         if stage.exists():
             shutil.rmtree(stage)
         shutil.copytree(macos_template, stage)
@@ -661,11 +708,9 @@ def _package_macos_mono(
                 dest = stage / "Contents" / "MacOS" / f"godot_macos_{variant}.universal"
                 shutil.copy2(src, dest)
                 dest.chmod(dest.stat().st_mode | 0o111)
-        _zip_directory(
-            stage,
-            templates_dir_mono / "macos.zip",
-            arcname_root="macos_template.app",
-        )
+        macos_zip = staging / "macos.zip"
+        _zip_directory(stage, macos_zip, arcname_root="macos_template.app")
+        tpz.add(macos_zip, "macos.zip")
         shutil.rmtree(stage)
     else:
         logger.warning(
@@ -684,7 +729,7 @@ def _package_macos_mono(
 def _package_web_classical(
     out_dir: Path,
     release_dir: Path,
-    templates_dir: Path,
+    tpz: _TpzBuilder,
     godot_basename: str,
 ) -> None:
     logger.info("Packaging Web (classical)...")
@@ -710,12 +755,12 @@ def _package_web_classical(
         for src_tmpl, dest_tmpl in variant_specs:
             src = templates_src / src_tmpl.format(v=variant)
             if src.is_file():
-                shutil.copy2(src, templates_dir / dest_tmpl.format(v=variant))
+                tpz.add(src, dest_tmpl.format(v=variant))
             else:
                 logger.info("Web template %s missing; skipping.", src.name)
 
 
-def _package_web_mono(out_dir: Path, templates_dir_mono: Path) -> None:
+def _package_web_mono(out_dir: Path, tpz: _TpzBuilder) -> None:
     """Package web mono templates if present.
 
     Note: the Web build module currently doesn't produce Mono web templates.
@@ -734,7 +779,7 @@ def _package_web_mono(out_dir: Path, templates_dir_mono: Path) -> None:
     for variant in ("release", "debug"):
         src = templates_src / f"godot.web.template_{variant}.wasm32.mono.zip"
         if src.is_file():
-            shutil.copy2(src, templates_dir_mono / f"web_{variant}.zip")
+            tpz.add(src, f"web_{variant}.zip")
             found_any = True
     if not found_any:
         logger.info(
@@ -752,7 +797,7 @@ def _package_web_mono(out_dir: Path, templates_dir_mono: Path) -> None:
 def _package_android_classical(
     out_dir: Path,
     release_dir: Path,
-    templates_dir: Path,
+    tpz: _TpzBuilder,
     godot_basename: str,
     templates_version: str,
 ) -> None:
@@ -793,19 +838,19 @@ def _package_android_classical(
         else:
             logger.info("Android editor artifact %s missing; skipping.", editor)
 
-    # Templates: copy any .apk + android_source.zip
+    # Templates: stage any .apk + android_source.zip into the .tpz.
     if templates_src.is_dir():
         for apk in sorted(templates_src.glob("*.apk")):
-            shutil.copy2(apk, templates_dir / apk.name)
+            tpz.add(apk, apk.name)
         src_zip = templates_src / "android_source.zip"
         if src_zip.is_file():
-            shutil.copy2(src_zip, templates_dir / "android_source.zip")
+            tpz.add(src_zip, "android_source.zip")
 
 
 def _package_android_mono(
     out_dir: Path,
     release_dir_mono: Path,
-    templates_dir_mono: Path,
+    tpz: _TpzBuilder,
     godot_basename: str,
     templates_version: str,
 ) -> None:
@@ -832,10 +877,10 @@ def _package_android_mono(
 
     if templates_src.is_dir():
         for apk in sorted(templates_src.glob("*.apk")):
-            shutil.copy2(apk, templates_dir_mono / apk.name)
+            tpz.add(apk, apk.name)
         src_zip = templates_src / "android_source.zip"
         if src_zip.is_file():
-            shutil.copy2(src_zip, templates_dir_mono / "android_source.zip")
+            tpz.add(src_zip, "android_source.zip")
 
 
 # Basename of the native debug symbols zip the Android template_release build
@@ -908,8 +953,9 @@ def _find_ios_xcode_dir(upstream_godot_dir: Path) -> Path | None:
 def _package_ios_common(
     basedir: Path,
     out_dir: Path,
-    templates_dest: Path,
+    tpz: _TpzBuilder,
     upstream_godot_dir: Path,
+    staging: Path,
     *,
     mono: bool,
 ) -> None:
@@ -938,7 +984,7 @@ def _package_ios_common(
         )
         return
 
-    stage = basedir / "tmp" / ("ios_xcode_mono" if mono else "ios_xcode")
+    stage = staging / "ios_xcode"
     if stage.exists():
         shutil.rmtree(stage)
     shutil.copytree(xcode_src, stage)
@@ -980,63 +1026,39 @@ def _package_ios_common(
         shutil.rmtree(stage)
         return
 
-    _zip_directory_contents(stage, templates_dest / "ios.zip")
+    ios_zip = staging / "ios.zip"
+    _zip_directory_contents(stage, ios_zip)
+    tpz.add(ios_zip, "ios.zip")
     shutil.rmtree(stage)
 
 
 def _package_ios_classical(
     basedir: Path,
     out_dir: Path,
-    templates_dir: Path,
+    tpz: _TpzBuilder,
     upstream_godot_dir: Path,
+    staging: Path,
 ) -> None:
-    _package_ios_common(basedir, out_dir, templates_dir, upstream_godot_dir, mono=False)
+    _package_ios_common(
+        basedir, out_dir, tpz, upstream_godot_dir, staging, mono=False
+    )
 
 
 def _package_ios_mono(
     basedir: Path,
     out_dir: Path,
-    templates_dir_mono: Path,
+    tpz: _TpzBuilder,
     upstream_godot_dir: Path,
+    staging: Path,
 ) -> None:
     _package_ios_common(
-        basedir, out_dir, templates_dir_mono, upstream_godot_dir, mono=True
+        basedir, out_dir, tpz, upstream_godot_dir, staging, mono=True
     )
 
 
 # ---------------------------------------------------------------------------
-# TPZ + SHA512 helpers
+# SHA512 helpers
 # ---------------------------------------------------------------------------
-
-
-def _create_tpz_bundle(
-    staging_dir: Path,
-    output_path: Path,
-    version_text: str,
-) -> None:
-    """Zip ``staging_dir`` into ``output_path`` with a top-level ``version.txt``.
-
-    The .tpz convention is a zipfile whose entries are rooted at
-    ``templates/`` and which contains a ``templates/version.txt`` file at
-    the top of the staging dir.
-    """
-    if not staging_dir.is_dir():
-        logger.warning(
-            "TPZ source dir %s missing; not creating %s.", staging_dir, output_path
-        )
-        return
-
-    # Always (re)write version.txt to reflect the just-built release.
-    (staging_dir / "version.txt").write_text(version_text + "\n", encoding="utf-8")
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    arcname_root = staging_dir.name  # entries land under "templates/...".
-    with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-        for path in sorted(staging_dir.rglob("*")):
-            if path.is_file():
-                rel = path.relative_to(staging_dir)
-                zf.write(path, arcname=f"{arcname_root}/{rel.as_posix()}")
-    logger.info("Created TPZ %s", output_path)
 
 
 def _generate_sha512sums(directory: Path, *, recurse_mono: bool) -> None:

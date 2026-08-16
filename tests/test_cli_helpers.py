@@ -64,11 +64,13 @@ class TestParsePlatforms:
 
         assert set(result) == {"linux", "windows", "macos", "android", "web", "ios"}
 
-    def test_all_leads_with_linux_then_windows_for_desktop_first_build_order(self, cli):
+    def test_all_leads_with_linux_android_windows_build_order(self, cli):
         result = cli._parse_platforms("all")
 
         assert result[0] == "linux"
-        assert result[1] == "windows"
+        assert result[1] == "android"
+        assert result[2] == "windows"
+        assert result[3:] == ["macos", "ios", "web"]
 
     def test_csv_is_split_and_lowercased_when_multiple_platforms_given(self, cli):
         assert cli._parse_platforms("Linux, Windows") == ["linux", "windows"]
@@ -207,6 +209,7 @@ def _release_args(config_path, **overrides) -> argparse.Namespace:
         config=config_path,
         platform="all",
         do_build=False,
+        force=False,
         do_package=False,
         do_upload=True,
         do_nuget=False,
@@ -482,6 +485,36 @@ class TestReleaseAppleAlwaysBuilds:
         assert rc == 0
         assert captured["platforms"] == ["linux", "windows"]
         assert captured["build_archs"] is None
+
+    def test_release_threads_force_flag_to_dispatch_build(self, cli, config_path):
+        captured = {}
+
+        def fake_build(**kwargs):
+            captured.update(kwargs)
+            return 0
+
+        args = _release_args(
+            config_path, platform="linux", do_build=True, do_upload=False, force=True
+        )
+        with mock.patch.object(cli, "dispatch_build", side_effect=fake_build):
+            rc = cli.cmd_release(args)
+
+        assert rc == 0
+        assert captured["force"] is True
+
+    def test_release_defaults_force_off(self, cli, config_path):
+        captured = {}
+
+        def fake_build(**kwargs):
+            captured.update(kwargs)
+            return 0
+
+        args = _release_args(config_path, platform="linux", do_build=True, do_upload=False)
+        with mock.patch.object(cli, "dispatch_build", side_effect=fake_build):
+            rc = cli.cmd_release(args)
+
+        assert rc == 0
+        assert captured["force"] is False
 
 
 # ---------------------------------------------------------------------------

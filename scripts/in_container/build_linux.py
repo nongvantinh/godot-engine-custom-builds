@@ -128,42 +128,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         godot_dir = common.setup_godot_source()
 
-        if classical:
-            logger.info("Starting classical build for Linux...")
-            for arch, sdk_var in arch_sdk:
-                env = _arch_env(arch, sdk_var)
-
-                common.run_scons(
-                    "platform=linuxbsd",
-                    f"arch={arch}",
-                    *_OPTIONS,
-                    "target=editor",
-                    num_cores=num_cores,
-                    env=env,
-                    cwd=godot_dir,
-                )
-                _copy_bin_and_clean(godot_dir, out_root / arch / "tools")
-
-                common.run_scons(
-                    "platform=linuxbsd",
-                    f"arch={arch}",
-                    *_OPTIONS,
-                    "target=template_debug",
-                    num_cores=num_cores,
-                    env=env,
-                    cwd=godot_dir,
-                )
-                common.run_scons(
-                    "platform=linuxbsd",
-                    f"arch={arch}",
-                    *_OPTIONS,
-                    "target=template_release",
-                    num_cores=num_cores,
-                    env=env,
-                    cwd=godot_dir,
-                )
-                _copy_bin_and_clean(godot_dir, out_root / arch / "templates")
-
         if mono:
             logger.info("Starting Mono build for Linux...")
             common.copy_mono_glue(mono_glue_src, godot_dir, include_editor=True)
@@ -205,6 +169,47 @@ def main(argv: Sequence[str] | None = None) -> int:
                     cwd=godot_dir,
                 )
                 _copy_bin_and_clean(godot_dir, out_root / arch / "templates-mono")
+
+        if mono and classical:
+            logger.info("Restarting from clean tarball for classical pass...")
+            shutil.rmtree(godot_dir)
+            godot_dir = common.setup_godot_source()
+
+        if classical:
+            logger.info("Starting classical build for Linux...")
+            for arch, sdk_var in arch_sdk:
+                env = _arch_env(arch, sdk_var)
+
+                common.run_scons(
+                    "platform=linuxbsd",
+                    f"arch={arch}",
+                    *_OPTIONS,
+                    "target=editor",
+                    num_cores=num_cores,
+                    env=env,
+                    cwd=godot_dir,
+                )
+                _copy_bin_and_clean(godot_dir, out_root / arch / "tools")
+
+                common.run_scons(
+                    "platform=linuxbsd",
+                    f"arch={arch}",
+                    *_OPTIONS,
+                    "target=template_debug",
+                    num_cores=num_cores,
+                    env=env,
+                    cwd=godot_dir,
+                )
+                common.run_scons(
+                    "platform=linuxbsd",
+                    f"arch={arch}",
+                    *_OPTIONS,
+                    "target=template_release",
+                    num_cores=num_cores,
+                    env=env,
+                    cwd=godot_dir,
+                )
+                _copy_bin_and_clean(godot_dir, out_root / arch / "templates")
 
         logger.info("Linux build successful")
         return 0

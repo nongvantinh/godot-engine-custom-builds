@@ -119,8 +119,10 @@ name = "linux"
 image = "ghcr.io/nongvantinh/godot-linux:4.8"
 scons_flags = "platform=linuxbsd"
 archs = ["x86_64", "x86_32", "arm64", "arm32"]
-# Sets up the x86_64 buildroot cross-compiler before running SCons.
-env_setup = "export PATH=$GODOT_SDK_LINUX_X86_64/bin:$BASE_PATH"
+# Selects the per-arch buildroot cross-compiler before running SCons. The
+# {arch_upper} token is resolved per invocation from the command's arch=<arch>
+# (x86_64/x86_32/arm64/arm32 -> GODOT_SDK_LINUX_X86_64/X86_32/ARM64/ARM32).
+env_setup = "export PATH=$GODOT_SDK_LINUX_{arch_upper}/bin:$BASE_PATH"
 
 [[platforms]]
 name = "windows"

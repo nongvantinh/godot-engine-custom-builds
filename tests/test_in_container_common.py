@@ -112,6 +112,35 @@ class TestRunScons:
             common.run_scons("target=editor", num_cores=1, env={"PATH": "/sdk/bin"})
         assert run.call_args.kwargs["env"] == {"PATH": "/sdk/bin"}
 
+    def test_tees_scons_output_to_console_when_logging(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("GODOT_LOG_DIR", str(tmp_path))
+        monkeypatch.setenv("GODOT_BUILD_PLATFORM", "linux")
+        captured: list[str] = []
+
+        def fake_write(data: str) -> int:
+            captured.append(data)
+            return len(data)
+
+        with (
+            mock.patch("scripts.in_container.common.subprocess.Popen") as popen,
+            mock.patch("scripts.in_container.common.sys.stdout") as stdout,
+        ):
+            stdout.write.side_effect = fake_write
+            process = mock.Mock()
+            process.stdout = iter(["Compiling foo.cpp\n", "Linking...\n"])
+            process.wait.return_value = 0
+            popen.return_value = process
+            common.run_scons(
+                "platform=linuxbsd",
+                "arch=x86_64",
+                "target=editor",
+                num_cores=1,
+            )
+
+        log_path = tmp_path / "linux" / "classical" / "x86_64.editor.log"
+        assert log_path.read_text().endswith("Linking...\n")
+        assert captured == ["Compiling foo.cpp\n", "Linking...\n"]
+
 
 # ---------------------------------------------------------------------------
 # extract_tarball / setup_godot_source
